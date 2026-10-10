@@ -1,6 +1,6 @@
 import { h, esc, relDate, relDateTime, dateKey, todayKey, addDays, dailyTitle, uid } from './util.js';
 import { icon } from './icons.js';
-import { S, newBlock, locate, touch, walk, findByTitle, createObject, ensureObject, search, objectsOfType, meetingBlocks, typeOf, getObject } from './store.js';
+import { S, REPEATS, toggleTask as storeToggle, newBlock, locate, touch, walk, findByTitle, createObject, ensureObject, search, objectsOfType, meetingBlocks, typeOf, getObject } from './store.js';
 import { renderInline } from './inline.js';
 import { showMenu, closeMenu, menuOpen, caretXY, datePopover, toast } from './ui.js';
 import * as hooks from './hooks.js';
@@ -15,6 +15,7 @@ const SLASH = [
   { label: 'Callout', icon: 'callout', act: 'type:callout', k: 'callout note info' },
   { label: 'Code', icon: 'code', act: 'type:code', k: 'code snippet' },
   { label: 'Due date', icon: 'calendar', act: 'due', k: 'due date deadline schedule' },
+  { label: 'Repeat', icon: 'refresh', act: 'due', k: 'repeat recurring every daily weekly monthly' },
   { label: 'Reminder', icon: 'bell', act: 'remind', k: 'reminder remind alarm notify' },
   { label: 'Link to page', icon: 'link', act: 'link', k: 'link page object reference' },
   { label: "Today's date", icon: 'calendar', act: 'date:0', k: 'today date' },
@@ -120,6 +121,7 @@ class Outline {
     const t = b.task; const out = [];
     const overdue = t.due && t.status !== 'done' && t.due < todayKey();
     const mk = (cls, ic, text, mode) => h('button', { class: `chip ${cls}`, tabindex: '-1', html: `${icon(ic, 12)}<span>${esc(text)}</span>`, onclick: (e) => this.pickDate(b, mode, e.currentTarget) });
+    if (t.repeat) out.push(h('span', { class: 'chip repeat', title: REPEATS[t.repeat], html: `${icon('refresh', 11)}<span>${t.repeat === 'weekdays' ? 'Weekdays' : t.repeat[0].toUpperCase() + t.repeat.slice(1)}</span>` }));
     if (t.due) out.push(mk(`due${overdue ? ' overdue' : ''}${t.due === todayKey() ? ' today' : ''}`, 'calendar', relDate(t.due), 'due'));
     if (t.remind) out.push(mk(`remind${new Date(t.remind) < new Date() && t.status !== 'done' ? ' overdue' : ''}`, 'bell', relDateTime(t.remind), 'remind'));
     if (t.todoistId) out.push(h('span', { class: 'chip todoist', title: 'Synced with Todoist', html: `${icon('external', 11)}<span>Todoist</span>` }));
@@ -127,7 +129,7 @@ class Outline {
   }
 
   pickDate(b, mode, anchor) {
-    datePopover({ anchor, mode, due: b.task?.due, remind: b.task?.remind, onChange: (v) => {
+    datePopover({ anchor, mode, due: b.task?.due, remind: b.task?.remind, repeat: b.task?.repeat, onChange: (v) => {
       b.task ||= { status: 'todo' };
       Object.assign(b.task, v);
       if (v.remind) { b.task.notified = false; hooks.askNotify(); }
@@ -137,11 +139,9 @@ class Outline {
   }
 
   toggleTask(b) {
-    const t = b.task; if (!t) return;
-    t.status = t.status === 'done' ? 'todo' : 'done';
-    t.completedAt = t.status === 'done' ? Date.now() : null;
-    hooks.todoistToggle(b);
-    this.changed(); this.render();
+    if (!b.task) return;
+    storeToggle(b, this.obj, (x) => hooks.todoistToggle(x));
+    this.render();
   }
 
   // ---------- editing ----------
@@ -295,6 +295,7 @@ class Outline {
       if (e.key === 'Escape') { e.preventDefault(); closeMenu(); this.pop = null; return; }
     }
     const pos = ta.selectionStart; const end = ta.selectionEnd; const collapsed = pos === end;
+    if (e.key === ']' && collapsed && ta.value[pos] === ']' && !mod) { e.preventDefault(); ta.setSelectionRange(pos + 1, pos + 1); closeMenu(); this.pop = null; return; }
     if (mod && e.key === 'Enter') { e.preventDefault(); return this.cycleTask(b); }
     if (mod && (e.key === 'b' || e.key === 'i')) { e.preventDefault(); return this.wrap(e.key === 'b' ? '**' : '*'); }
     if (mod && e.key === 'k') { e.preventDefault(); return this.wrapLink(); }
@@ -327,7 +328,7 @@ class Outline {
   cycleTask(b) {
     b.text = this.ta.value;
     if (!b.task) b.task = { status: 'todo' };
-    else if (b.task.status === 'todo') { b.task.status = 'done'; b.task.completedAt = Date.now(); hooks.todoistToggle(b); }
+    else if (b.task.status === 'todo') { storeToggle(b, this.obj, (x) => hooks.todoistToggle(x)); }
     else { b.task = null; }
     this.changed(); this.render({ id: b.id, pos: this.ta.selectionStart });
   }

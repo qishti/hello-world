@@ -281,3 +281,44 @@ canvas.graph { flex: 1; width: 100%; min-height: 300px; border: 1px solid var(--
   .view-head h1 { font-size: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+.chip.repeat { background: var(--accent-soft); color: var(--accent-text); }
+.popover .rep { height: 34px; width: 100%; }
+
+/* ---------- side panel ---------- */
+.app { grid-template-columns: var(--sb) minmax(0, 1fr) 0; }
+.has-panel:not(.pn-closed) .app { grid-template-columns: var(--sb) minmax(0, 1fr) 280px; }
+.sb-closed.has-panel:not(.pn-closed) .app { grid-template-columns: 0 minmax(0, 1fr) 280px; }
+.sb-closed .app { grid-template-columns: 0 minmax(0, 1fr) 0; }
+.panel { overflow-y: auto; border-left: 1px solid var(--line); background: var(--bg2); display: none; }
+.has-panel:not(.pn-closed) .panel { display: block; }
+#pn-toggle { display: none; } .has-panel #pn-toggle { display: inline-grid; }
+.panel-in { padding: 64px 16px 40px; display: grid; gap: 22px; }
+.pn-label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); padding: 0 8px 6px; } .pn-label b { font-weight: 600; background: var(--bg3); border-radius: 8px; padding: 0 6px; }
+.pn-head, .pn-link { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; font-size: 13.5px; color: var(--text2); overflow: hidden; } .pn-head { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.pn-head:hover, .pn-link:hover { background: var(--bg3); color: var(--text); } .pn-link { --c: var(--accent); } .pn-link .ic { color: var(--c); } .pn-link span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pn-link em { font-style: normal; color: var(--faint); font-size: 12px; }
+.pn-empty { padding: 0 8px; font-size: 13px; color: var(--faint); }
+.pn-info { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 13px; color: var(--muted); } .pn-info b { font-weight: 550; color: var(--text2); }
+.pn-actions { display: flex; gap: 6px; padding: 8px 8px 0; }
+@media (max-width: 1199px) { .has-panel:not(.pn-closed) .app { grid-template-columns: var(--sb) minmax(0, 1fr) 0; } .panel { display: none !important; } #pn-toggle { display: none !important; } }
+
+/* ---------- type views ---------- */
+.type-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .type-tools .input { height: 34px; }
+.seg.icons button { width: 32px; height: 28px; display: grid; place-items: center; padding: 0; }
+.olist { margin-top: 14px; display: grid; } .orow { --c: var(--accent); display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px; border-bottom: 1px solid var(--line); } .orow:hover { background: var(--bg2); }
+.orow-title { font-weight: 550; flex: none; max-width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .orow-prev { flex: 1; color: var(--muted); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .orow-time { color: var(--faint); font-size: 12.5px; flex: none; }
+.tbl-wrap { margin-top: 14px; border: 1px solid var(--line); border-radius: 14px; overflow: auto; box-shadow: var(--shadow-sm); }
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; } .tbl th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; background: var(--bg2); border-bottom: 1px solid var(--line); cursor: pointer; white-space: nowrap; user-select: none; } .tbl th.sorted { color: var(--text); }
+.tbl td { padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--text2); } .tbl td.tt { color: var(--text); font-weight: 550; } .tbl tr { cursor: pointer; } .tbl tbody tr:hover td { background: var(--bg2); } .tbl tbody tr:last-child td { border-bottom: 0; }
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 14px; margin-top: 16px; overflow-x: auto; padding-bottom: 12px; }
+.col { background: var(--bg2); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 160px; border: 1px dashed transparent; } .col.over { border-color: var(--accent); background: var(--accent-soft); }
+.col-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 650; color: var(--muted); padding: 2px 4px; } .col-head b { font-weight: 600; background: var(--bg3); border-radius: 8px; padding: 0 7px; }
+.col .obj-card { min-height: 0; } .col .obj-cover { display: none; } .col .obj-card-title { padding-right: 0; }
+
+/* ---------- history, present ---------- */
+.hist-cols { display: grid; grid-template-columns: 200px 1fr; height: 52vh; } .hist-list { overflow-y: auto; border-right: 1px solid var(--line); padding: 8px; display: grid; align-content: start; gap: 2px; }
+.hist-item { display: flex; flex-direction: column; text-align: left; padding: 8px 10px; border-radius: 9px; font-size: 13px; } .hist-item span { color: var(--muted); font-size: 12px; } .hist-item:hover { background: var(--bg2); } .hist-item.on { background: var(--accent-soft); }
+.hist-prev { overflow: auto; padding: 14px 18px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; color: var(--text2); } .hist .modal-actions { padding: 12px 16px; margin: 0; border-top: 1px solid var(--line); }
+.present { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: grid; place-items: center; padding: 6vw; cursor: pointer; }
+.slide { max-width: 1000px; width: 100%; } .slide-title { font-size: clamp(34px, 5vw, 64px); font-weight: 700; letter-spacing: -.03em; line-height: 1.1; margin-bottom: 28px; } .slide-body { font-size: clamp(26px, 3.4vw, 44px); line-height: 1.35; font-weight: 500; }
+.slide ul { list-style: none; display: grid; gap: 12px; font-size: clamp(20px, 2.4vw, 30px); line-height: 1.4; color: var(--text2); } .slide li ul { margin: 10px 0 0 28px; font-size: .86em; } .slide li::before { content: "•"; color: var(--accent); margin-right: 12px; }
+.present-x { position: absolute; top: 20px; right: 20px; } .present-count { position: absolute; bottom: 20px; right: 28px; color: var(--faint); font-size: 14px; }

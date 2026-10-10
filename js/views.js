@@ -1,11 +1,12 @@
 import { h, esc, todayKey, addDays, parseKey, dateKey, dailyTitle, relDate, relDateTime, timeAgo, WEEKDAYS, MONTHS_LONG, download, copyText, fmtTime, pad } from './util.js';
 import { icon, ICON_NAMES } from './icons.js';
-import { S, runtime, getObject, typeOf, ensureDaily, createObject, deleteObject, renameObject, touch, backlinks, unlinkedMentions, linkMention, objectsOfType, allObjects, collectTasks, toggleFavorite, outgoing, walk, newBlock, exportMarkdown, saveNow, findByTitle } from './store.js';
+import { S, runtime, getObject, typeOf, ensureDaily, createObject, deleteObject, renameObject, touch, backlinks, unlinkedMentions, linkMention, objectsOfType, allObjects, collectTasks, toggleFavorite, outgoing, walk, newBlock, toggleTask, saveNow, findByTitle, snapshot, restoreSnapshot, linksIn } from './store.js';
 import { mountOutline } from './outline.js';
 import { renderInline, chip } from './inline.js';
 import { showMenu, toast, confirmBox, promptBox, modal, closeMenu } from './ui.js';
 import * as I from './integrations.js';
 import * as hooks from './hooks.js';
+import { objectToMarkdown, downloadZip, downloadSingle } from './export.js';
 
 export const go = (hash) => { location.hash = hash; };
 const main = () => document.getElementById('main-body');
@@ -59,27 +60,29 @@ function objActions(obj) {
   return [
     h('button', { class: `icon-btn${fav ? ' on' : ''}`, title: fav ? 'Unfavorite' : 'Favorite', html: icon('star', 17), onclick: () => { toggleFavorite(obj.id); rerender(); } }),
     h('button', { class: 'icon-btn', title: 'More', html: icon('dots', 17), onclick: (e) => showMenu({ anchor: e.currentTarget, keepFocus: false, items: [
-      { label: 'Copy as Markdown', icon: 'copy', value: 'copy' }, { label: 'Download .md', icon: 'download', value: 'dl' }, { sep: true }, { label: 'Delete object', icon: 'trash', value: 'del', danger: true }],
+      { label: 'Present', icon: 'play', value: 'present' }, { label: 'Version history', icon: 'history', value: 'hist' }, { sep: true }, { label: 'Copy as Markdown', icon: 'copy', value: 'copy' }, { label: 'Download .md', icon: 'download', value: 'dl' }, { sep: true }, { label: 'Delete object', icon: 'trash', value: 'del', danger: true }],
     onPick: async (it) => {
-      if (it.value === 'copy') { copyText(exportMarkdown(obj)); toast('Copied as Markdown'); }
-      if (it.value === 'dl') download(`${obj.title.replace(/[^\w -]/g, '')}.md`, exportMarkdown(obj), 'text/markdown');
+      if (it.value === 'present') present(obj);
+      if (it.value === 'hist') historyModal(obj);
+      if (it.value === 'copy') { copyText(objectToMarkdown(obj)); toast('Copied as Markdown'); }
+      if (it.value === 'dl') download(`${obj.title.replace(/[^\w -]/g, '')}.md`, objectToMarkdown(obj), 'text/markdown');
       if (it.value === 'del' && await confirmBox(`Delete “${obj.title}”? Links to it will stay as plain text.`)) { deleteObject(obj.id); go('#/daily'); }
     } }) }),
   ];
 }
 
 function propsEl(obj) {
-  const defs = typeOf(obj).props || [];
-  if (!defs.length) return h('div');
+  const defs = [{ key: 'aliases', label: 'Aliases', kind: 'aliases' }, ...(typeOf(obj).props || [])];
   const wrap = h('div', { class: 'props' });
-  const shown = new Set(defs.filter((d) => obj.props[d.key]).map((d) => d.key));
+  const shown = new Set(defs.filter((d) => (d.kind === 'aliases' ? obj.aliases?.length : obj.props[d.key])).map((d) => d.key));
   const paint = () => {
     wrap.textContent = '';
     defs.filter((d) => shown.has(d.key)).forEach((d) => {
-      const val = obj.props[d.key] || '';
+      const val = d.kind === 'aliases' ? (obj.aliases || []).join(', ') : obj.props[d.key] || '';
       const set = (v) => { obj.props[d.key] = v; touch(obj); };
       let input;
-      if (d.kind === 'select') input = h('select', { class: 'prop-input', onchange: (e) => set(e.target.value) }, h('option', { value: '' }, '—'), d.options.map((o) => h('option', { value: o, selected: o === val }, o)));
+      if (d.kind === 'aliases') input = h('input', { class: 'prop-input', type: 'text', value: val, placeholder: 'Other names that link here, comma separated', onchange: (e) => { obj.aliases = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); touch(obj, true); } });
+      else if (d.kind === 'select') input = h('select', { class: 'prop-input', onchange: (e) => set(e.target.value) }, h('option', { value: '' }, '—'), d.options.map((o) => h('option', { value: o, selected: o === val }, o)));
       else if (d.kind === 'date') input = h('div', { class: 'prop-date' }, h('input', { type: 'date', class: 'prop-input', value: val, onchange: (e) => { set(e.target.value); paint(); } }), val ? h('a', { class: 'prop-open', title: 'Open daily note', onclick: () => go('#/daily/' + val), html: icon('arrowR', 13) }) : null);
       else input = h('div', { class: 'prop-date' }, h('input', { class: 'prop-input', type: 'text', value: val, placeholder: 'Empty', onchange: (e) => set(e.target.value.trim()) }), d.kind === 'url' && val ? h('a', { class: 'prop-open', href: val, target: '_blank', rel: 'noopener', html: icon('external', 13) }) : null);
       wrap.append(h('div', { class: 'prop' }, h('span', { class: 'prop-label' }, d.label), input));
@@ -94,7 +97,7 @@ function propsEl(obj) {
 // ---------- backlinks ----------
 function refBlock(b, obj) {
   const row = h('div', { class: `ref-block${b.task ? ' is-task' : ''}${b.task?.status === 'done' ? ' done' : ''}` });
-  if (b.task) row.append(h('button', { class: `check ${b.task.status}`, html: b.task.status === 'done' ? icon('check', 12) : '', onclick: (e) => { e.stopPropagation(); b.task.status = b.task.status === 'done' ? 'todo' : 'done'; hooks.todoistToggle(b); touch(obj); rerender(); } }));
+  if (b.task) row.append(h('button', { class: `check ${b.task.status}`, html: b.task.status === 'done' ? icon('check', 12) : '', onclick: (e) => { e.stopPropagation(); toggleBlockTask(b, obj); rerender(); } }));
   else row.append(h('span', { class: 'bullet' }, h('i')));
   row.append(h('div', { class: 'ref-text', html: renderInline(b.text) || '<span class="muted">Empty</span>' }));
   row.addEventListener('click', (e) => { if (e.target.closest('a, .check')) return; go(`#/o/${obj.id}?b=${b.id}`); });
@@ -183,8 +186,7 @@ function agendaCard(key) {
 }
 
 export function toggleBlockTask(b, obj) {
-  const t = b.task; t.status = t.status === 'done' ? 'todo' : 'done'; t.completedAt = t.status === 'done' ? Date.now() : null;
-  hooks.todoistToggle(b); touch(obj);
+  toggleTask(b, obj, (x) => hooks.todoistToggle(x));
 }
 
 function dayTasksCard(key) {
@@ -328,25 +330,54 @@ export function renderType(tid) {
   const t = S.types[tid]; const root = main(); root.textContent = '';
   if (!t) return go('#/daily');
   setActions([]);
+  S.settings.views ||= {};
+  const selectProp = (t.props || []).find((p) => p.kind === 'select');
+  const modes = [['grid', 'Gallery', 'grid'], ['table', 'Table', 'table'], ['list', 'List', 'list'], ...(selectProp ? [['board', `Board`, 'board']] : [])];
+  let mode = S.settings.views[tid] || 'grid'; if (!modes.some((m) => m[0] === mode)) mode = 'grid';
+  let q = ''; let tag = ''; let sort = { k: tid === 'daily' ? 'date' : 'updated', dir: -1 };
   const page = h('div', { class: 'page wide' });
-  let q = '';
-  const list = h('div', { class: 'grid' });
+  const body = h('div', { class: 'type-body' });
+  const preview = (o) => { let p = ''; walk(o.blocks, (b) => { if (p.length < 140 && b.text.trim()) p += (p ? ' · ' : '') + b.text.replace(/\[\[|\]\]|\*\*/g, ''); }); return p.slice(0, 140) || 'Empty'; };
+  const tagsOf = (o) => { const set = new Set(); walk(o.blocks, (b) => linksIn(b.text).forEach((l) => set.add(l))); return set; };
+  const open = (o) => go('#/o/' + o.id);
+  const items = () => {
+    let r = objectsOfType(tid).filter((o) => o.title.toLowerCase().includes(q));
+    if (tag) r = r.filter((o) => tagsOf(o).has(tag));
+    const val = (o) => (sort.k === 'title' ? o.title.toLowerCase() : sort.k === 'date' ? o.date || '' : sort.k === 'updated' ? o.updated : (o.props?.[sort.k] || '').toLowerCase());
+    return r.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sort.dir);
+  };
+  const card = (o) => h('a', { class: 'obj-card', onclick: () => open(o), style: { '--c': t.color } },
+    o.props?.cover ? h('img', { class: 'obj-cover', src: o.props.cover, loading: 'lazy', alt: '', onerror: (e) => e.target.remove() }) : null,
+    h('div', { class: 'obj-card-top' }, typeBadge(t), h('span', { class: 'obj-card-time' }, timeAgo(o.updated))),
+    h('div', { class: 'obj-card-title' }, o.title), h('div', { class: 'obj-card-prev' }, preview(o)), o.props?.author ? h('div', { class: 'obj-card-sub' }, o.props.author) : null);
   const paint = () => {
-    list.textContent = '';
-    const items = objectsOfType(tid).filter((o) => o.title.toLowerCase().includes(q)).sort((a, b) => (tid === 'daily' ? b.date.localeCompare(a.date) : b.updated - a.updated));
-    items.forEach((o) => {
-      let preview = ''; walk(o.blocks, (b) => { if (preview.length < 140 && b.text.trim() && !b.rw === false || (preview.length < 140 && b.text.trim())) preview += (preview ? ' · ' : '') + b.text.replace(/\[\[|\]\]|\*\*/g, ''); });
-      list.append(h('a', { class: 'obj-card', onclick: () => go('#/o/' + o.id), style: { '--c': t.color } },
-        o.props?.cover ? h('img', { class: 'obj-cover', src: o.props.cover, loading: 'lazy', alt: '', onerror: (e) => e.target.remove() }) : null,
-        h('div', { class: 'obj-card-top' }, typeBadge(t), h('span', { class: 'obj-card-time' }, timeAgo(o.updated))),
-        h('div', { class: 'obj-card-title' }, o.title), h('div', { class: 'obj-card-prev' }, preview.slice(0, 140) || 'Empty'),
-        o.props?.author ? h('div', { class: 'obj-card-sub' }, o.props.author) : null));
-    });
-    if (!items.length) list.append(h('div', { class: 'empty small' }, h('p', null, `No ${t.plural.toLowerCase()} yet.`)));
+    body.textContent = ''; const list = items();
+    if (!list.length) { body.append(h('div', { class: 'empty small' }, h('p', null, `No ${t.plural.toLowerCase()} yet.`))); return; }
+    if (mode === 'grid') body.append(h('div', { class: 'grid' }, list.map(card)));
+    else if (mode === 'list') body.append(h('div', { class: 'olist' }, list.map((o) => h('a', { class: 'orow', onclick: () => open(o), style: { '--c': t.color } }, typeBadge(t), h('span', { class: 'orow-title' }, o.title), h('span', { class: 'orow-prev' }, preview(o)), h('span', { class: 'orow-time' }, timeAgo(o.updated))))));
+    else if (mode === 'table') {
+      const cols = [{ k: 'title', l: 'Title' }, ...(t.props || []).filter((p) => !['url'].includes(p.kind)).slice(0, 4).map((p) => ({ k: p.key, l: p.label, kind: p.kind })), { k: 'updated', l: 'Updated' }];
+      const th = (c) => h('th', { class: sort.k === c.k ? 'sorted' : '', onclick: () => { sort = { k: c.k, dir: sort.k === c.k ? -sort.dir : 1 }; paint(); } }, c.l, sort.k === c.k ? (sort.dir > 0 ? ' ↑' : ' ↓') : '');
+      body.append(h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, cols.map(th))),
+        h('tbody', null, list.map((o) => h('tr', { onclick: () => open(o) }, cols.map((c) => h('td', { class: c.k === 'title' ? 'tt' : '' }, c.k === 'title' ? o.title : c.k === 'updated' ? timeAgo(o.updated) : c.kind === 'date' && o.props?.[c.k] ? relDate(o.props[c.k]) : o.props?.[c.k] || ''))))))));
+    } else if (mode === 'board') {
+      const opts = [...selectProp.options, ''];
+      body.append(h('div', { class: 'board' }, opts.map((opt) => {
+        const col = list.filter((o) => (o.props?.[selectProp.key] || '') === opt);
+        const el = h('div', { class: 'col', 'data-opt': opt }, h('div', { class: 'col-head' }, h('span', null, opt || 'No ' + selectProp.label.toLowerCase()), h('b', null, col.length)), col.map((o) => { const c = card(o); c.draggable = true; c.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', o.id); }); return c; }));
+        el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('over'); }); el.addEventListener('dragleave', () => el.classList.remove('over'));
+        el.addEventListener('drop', (e) => { e.preventDefault(); const o = getObject(e.dataTransfer.getData('text/plain')); if (o) { o.props[selectProp.key] = opt; touch(o); paint(); } });
+        return el;
+      })));
+    }
   };
   const search = h('input', { class: 'input search', placeholder: `Search ${t.plural.toLowerCase()}…`, oninput: (e) => { q = e.target.value.toLowerCase(); paint(); } });
+  const allTags = objectsOfType('tag').map((x) => x.title);
+  const tagSel = allTags.length ? h('select', { class: 'input', onchange: (e) => { tag = e.target.value.toLowerCase(); paint(); } }, h('option', { value: '' }, 'All tags'), allTags.map((x) => h('option', { value: x }, '#' + x))) : null;
+  const seg = h('div', { class: 'seg icons' }, modes.map(([k, l, ic]) => h('button', { class: k === mode ? 'on' : '', title: l, html: icon(ic, 15), onclick: (e) => { mode = k; S.settings.views[tid] = k; touch(); seg.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); paint(); } })));
   page.append(h('div', { class: 'view-head' }, h('h1', { class: 'with-ic', style: { '--c': t.color } }, typeBadge(t), t.plural),
-    tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>New ${esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) })), search, list);
+    tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>New ${esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) })),
+    h('div', { class: 'type-tools' }, search, tagSel, h('span', { class: 'top-spacer' }), seg), body);
   paint(); root.append(page);
 }
 export function newObject(tid = 'page') {
@@ -484,10 +515,74 @@ export function renderSettings() {
 
   // Data
   const imp = h('input', { type: 'file', accept: '.json', style: { display: 'none' }, onchange: async (e) => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (!d.objects) throw new Error('Not a Folio export'); if (!(await confirmBox('Replace all current data with this file?', 'Replace'))) return; Object.assign(S, d); touch(null, true); location.hash = '#/daily'; location.reload(); } catch (err) { toast(err.message, { kind: 'warn' }); } } });
-  page.append(sec('Your data', 'Everything lives in this browser (IndexedDB). Export regularly.',
+  page.append(sec('Your data', 'Everything lives in this browser (IndexedDB). The Markdown export holds all notes, tasks, calendar events and types as plain files with front matter. Tokens are never exported.',
     h('div', { class: 'set-actions' },
-      h('button', { class: 'btn', html: `${icon('download', 14)}<span>Export JSON</span>`, onclick: () => { saveNow(); download(`folio-${todayKey()}.json`, JSON.stringify({ ...S, settings: { ...S.settings, todoistToken: '', readwiseToken: '' } }, null, 1)); } }),
-      h('button', { class: 'btn', onclick: () => { const out = allObjects().filter((o) => o.type !== 'daily' || o.blocks.some((b) => b.text)).map((o) => exportMarkdown(o)).join('\n\n---\n\n'); download(`folio-${todayKey()}.md`, out, 'text/markdown'); }, html: `${icon('download', 14)}<span>Export Markdown</span>` }),
+      h('button', { class: 'btn primary', html: `${icon('download', 14)}<span>Download all as Markdown (.zip)</span>`, onclick: () => { const n = downloadZip(); toast(`Exported ${n} Markdown files`); } }),
+      h('button', { class: 'btn', onclick: () => downloadSingle(), html: `${icon('download', 14)}<span>Single .md file</span>` }),
+      h('button', { class: 'btn', html: `${icon('download', 14)}<span>Backup JSON</span>`, onclick: () => { saveNow(); download(`folio-${todayKey()}.json`, JSON.stringify({ ...S, settings: { ...S.settings, todoistToken: '', readwiseToken: '' } }, null, 1)); } }),
       h('button', { class: 'btn', onclick: () => imp.click() }, 'Import JSON…'), imp)));
   root.append(page);
+}
+
+// ======================================================================
+// Version history, presentation, side panel
+// ======================================================================
+export function historyModal(obj) {
+  snapshot(obj);
+  const hist = obj.history || [];
+  const prev = h('pre', { class: 'hist-prev' }, 'Select a version to preview.');
+  const list = h('div', { class: 'hist-list' });
+  let sel = -1;
+  const paint = () => {
+    list.textContent = '';
+    [...hist].map((v, i) => ({ v, i })).reverse().forEach(({ v, i }) => list.append(h('button', { class: `hist-item${i === sel ? ' on' : ''}`, onclick: () => { sel = i; prev.textContent = `# ${v.title}\n\n${blocksMd(v.blocks)}`; restore.disabled = false; paint(); } }, h('b', null, new Date(v.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })), h('span', null, `${countBlocks(v.blocks)} blocks`))));
+    if (!hist.length) list.append(h('div', { class: 'muted small', style: { padding: '12px' } }, 'No earlier versions yet. Versions are saved as you edit.'));
+  };
+  const restore = h('button', { class: 'btn primary', disabled: true, onclick: () => { restoreSnapshot(obj, sel); m.close(); rerender(); toast('Version restored. The previous state was saved too.'); } }, 'Restore this version');
+  const m = modal(h('div', { class: 'hist' }, h('div', { class: 'hist-cols' }, list, prev), h('div', { class: 'modal-actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Close'), restore)), { title: `Version history · ${obj.title}`, wide: true });
+  paint();
+}
+const countBlocks = (bs) => { let n = 0; walk(bs, () => n++); return n; };
+import { blocksToMarkdown as blocksMd } from './export.js';
+
+export function present(obj) {
+  const slides = obj.blocks.filter((b) => b.text.trim() || b.children.length);
+  if (!slides.length) return toast('Nothing to present yet');
+  let i = 0;
+  const stage = h('div', { class: 'slide' });
+  const ov = h('div', { class: 'present' }, h('button', { class: 'icon-btn present-x', html: icon('x', 20), onclick: close }), stage, h('div', { class: 'present-count' }));
+  const kids = (bs) => h('ul', null, bs.map((b) => h('li', { class: b.task ? 'tk' : '' }, h('span', { html: renderInline(b.text) }), b.children.length ? kids(b.children) : null)));
+  const paint = () => {
+    const b = slides[i]; stage.textContent = '';
+    const head = /^h\d$/.test(b.type) || b.children.length;
+    stage.append(h('div', { class: head ? 'slide-title' : 'slide-body', html: renderInline(b.text) }), b.children.length ? kids(b.children) : null);
+    ov.querySelector('.present-count').textContent = `${i + 1} / ${slides.length}`;
+  };
+  const key = (e) => { if (e.key === 'Escape') close(); else if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); i = Math.min(slides.length - 1, i + 1); paint(); } else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); i = Math.max(0, i - 1); paint(); } };
+  function close() { ov.remove(); document.removeEventListener('keydown', key, true); }
+  ov.addEventListener('click', (e) => { if (e.target.closest('.present-x')) return; i = Math.min(slides.length - 1, i + 1); paint(); });
+  document.addEventListener('keydown', key, true);
+  document.body.append(ov); paint();
+}
+
+export function panelContent(obj) {
+  const wrap = h('div', { class: 'panel-in' });
+  if (!obj) return wrap;
+  const t = typeOf(obj);
+  // outline of headings
+  const heads = []; walk(obj.blocks, (b, _p, d) => { if (/^h[123]$/.test(b.type) && b.text.trim()) heads.push({ b, d: +b.type[1] }); });
+  wrap.append(h('div', { class: 'pn-sec' }, h('div', { class: 'pn-label' }, 'Outline'),
+    heads.length ? heads.map(({ b, d }) => h('a', { class: 'pn-head', style: { paddingLeft: 8 + (d - 1) * 12 + 'px' }, onclick: () => document.querySelector(`[data-id="${b.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, b.text.replace(/\[\[|\]\]|\*\*/g, ''))) : h('div', { class: 'pn-empty' }, 'Add headings with / or #  to build an outline.')));
+  const links = backlinks(obj);
+  wrap.append(h('div', { class: 'pn-sec' }, h('div', { class: 'pn-label' }, 'Backlinks', h('b', null, links.reduce((s, g) => s + g.blocks.length, 0) || '')),
+    links.length ? links.map((g) => h('a', { class: 'pn-link', style: { '--c': typeOf(g.obj).color }, onclick: () => go('#/o/' + g.obj.id), html: `${icon(typeOf(g.obj).icon, 13)}<span>${esc(g.obj.title)}</span><em>${g.blocks.length}</em>` })) : h('div', { class: 'pn-empty' }, 'Nothing links here yet.')));
+  const out = [...outgoing(obj)].map((k) => findByTitle(k)).filter((o) => o && o.id !== obj.id);
+  if (out.length) wrap.append(h('div', { class: 'pn-sec' }, h('div', { class: 'pn-label' }, 'Links to'), [...new Set(out)].slice(0, 12).map((o) => h('a', { class: 'pn-link', style: { '--c': typeOf(o).color }, onclick: () => go(o.type === 'daily' ? '#/daily/' + o.date : '#/o/' + o.id), html: `${icon(typeOf(o).icon, 13)}<span>${esc(o.title)}</span>` }))));
+  let words = 0; let tasks = 0; let done = 0; walk(obj.blocks, (b) => { words += b.text.split(/\s+/).filter(Boolean).length; if (b.task) { tasks++; if (b.task.status === 'done') done++; } });
+  wrap.append(h('div', { class: 'pn-sec' }, h('div', { class: 'pn-label' }, 'Info'),
+    h('div', { class: 'pn-info' }, h('span', null, 'Type'), h('b', null, t.name)), h('div', { class: 'pn-info' }, h('span', null, 'Words'), h('b', null, words)),
+    tasks ? h('div', { class: 'pn-info' }, h('span', null, 'Tasks'), h('b', null, `${done}/${tasks}`)) : null,
+    h('div', { class: 'pn-info' }, h('span', null, 'Updated'), h('b', null, timeAgo(obj.updated))),
+    h('div', { class: 'pn-actions' }, h('button', { class: 'btn small', onclick: () => present(obj), html: `${icon('play', 12)}<span>Present</span>` }), h('button', { class: 'btn small', onclick: () => historyModal(obj), html: `${icon('history', 12)}<span>History</span>` }))));
+  return wrap;
 }

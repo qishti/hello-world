@@ -1,4 +1,4 @@
-import { uid, dailyTitle, titleToKey, todayKey, debounce, dateKey, addDays } from './util.js';
+import { uid, dailyTitle, titleToKey, todayKey, debounce, dateKey, addDays, parseKey } from './util.js';
 
 export const BUILTIN_TYPES = {
   daily: { id: 'daily', name: 'Daily note', plural: 'Daily notes', icon: 'calendar', color: '#8b5cf6', builtin: true, props: [] },
@@ -68,11 +68,15 @@ export const subscribe = (fn) => { subs.add(fn); return () => subs.delete(fn); }
 const emit = debounce(() => subs.forEach((f) => f()), 120);
 /** Call after mutating data. struct=true when titles/blocks were added, removed or moved. */
 export function touch(obj, struct = false) {
-  if (obj) obj.updated = Date.now();
+  if (obj) { obj.updated = Date.now(); if (obj.type !== 'daily' || obj.blocks.length > 1 || obj.blocks[0]?.text) snapshotLater(obj); }
   if (struct) index = null;
   doSave();
   emit();
 }
+
+// Snapshots are taken at most every few minutes, after edits settle.
+const pending = new Map();
+function snapshotLater(obj) { clearTimeout(pending.get(obj.id)); pending.set(obj.id, setTimeout(() => { pending.delete(obj.id); if (S.objects[obj.id]) { snapshot(obj); } }, 4000)); }
 
 // ---------- blocks ----------
 export const newBlock = (text = '', extra = {}) => ({ id: uid(), text, type: 'text', collapsed: false, children: [], ...extra });
@@ -86,6 +90,7 @@ function buildIndex() {
     const rec = (arr, parent) => arr.forEach((b, i) => { blocks.set(b.id, { obj: o, block: b, arr, i, parent }); if (b.children.length) rec(b.children, b); });
     rec(o.blocks, null);
   }
+  for (const o of Object.values(S.objects)) for (const a of o.aliases || []) { const k = a.trim().toLowerCase(); if (k && !byTitle.has(k)) byTitle.set(k, o); }
   return { byTitle, blocks };
 }
 const ix = () => (index ||= buildIndex());
@@ -157,12 +162,12 @@ export function linksIn(text) {
   return out;
 }
 export function backlinks(obj) {
-  const key = obj.title.trim().toLowerCase();
+  const keys = [obj.title, ...(obj.aliases || [])].map((x) => x.trim().toLowerCase()).filter(Boolean);
   const groups = [];
   for (const o of Object.values(S.objects)) {
     if (o.id === obj.id) continue;
     const hits = [];
-    walk(o.blocks, (b) => { if (b.text && linksIn(b.text).includes(key)) hits.push(b); });
+    walk(o.blocks, (b) => { if (b.text && linksIn(b.text).some((l) => keys.includes(l))) hits.push(b); });
     if (hits.length) groups.push({ obj: o, blocks: hits });
   }
   return groups.sort((a, b) => b.obj.updated - a.obj.updated);
@@ -292,19 +297,53 @@ function seed() {
   d.blocks = [t('')];
 }
 
-export function exportMarkdown(obj) {
-  const lines = [`# ${obj.title}`, ''];
-  const props = Object.entries(obj.props || {}).filter(([, v]) => v);
-  props.forEach(([k, v]) => lines.push(`${k}:: ${v}`));
-  if (props.length) lines.push('');
-  walk(obj.blocks, (b, _p, depth) => {
-    const pad = '  '.repeat(depth);
-    const pre = b.task ? (b.task.status === 'done' ? '- [x] ' : '- [ ] ') : '- ';
-    const head = b.type === 'h1' ? '# ' : b.type === 'h2' ? '## ' : b.type === 'h3' ? '### ' : b.type === 'quote' ? '> ' : '';
-    const meta = b.task ? `${b.task.due ? ` 📅 ${b.task.due}` : ''}${b.task.remind ? ` ⏰ ${b.task.remind}` : ''}` : '';
-    lines.push(`${pad}${pre}${head}${b.text.replace(/\n/g, ' ')}${meta}`);
-  });
-  return lines.join('\n');
+export { todayKey, addDays };
+
+// ---------- recurring tasks ----------
+export const REPEATS = { daily: 'Every day', weekdays: 'Every weekday', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
+export function nextDue(due, rule) {
+  const d = parseKey(due);
+  if (rule === 'daily') d.setDate(d.getDate() + 1);
+  else if (rule === 'weekdays') { do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6); }
+  else if (rule === 'weekly') d.setDate(d.getDate() + 7);
+  else if (rule === 'monthly') d.setMonth(d.getMonth() + 1);
+  else if (rule === 'yearly') d.setFullYear(d.getFullYear() + 1);
+  return dateKey(d);
+}
+/** Complete or reopen a task. Recurring tasks advance to the next date instead of closing. */
+export function toggleTask(b, obj, hooksToggle) {
+  const t = b.task;
+  if (t.status !== 'done' && t.repeat) {
+    const base = t.due || todayKey(); let nd = nextDue(base, t.repeat);
+    while (nd <= todayKey() && base <= todayKey()) nd = nextDue(nd, t.repeat);
+    if (t.remind) { const diff = parseKey(nd) - parseKey(base); t.remind = new Date(new Date(t.remind).getTime() + diff).toISOString(); t.notified = false; }
+    t.due = nd; t.doneCount = (t.doneCount || 0) + 1; t.lastDone = Date.now();
+    hooksToggle?.({ ...b, task: { ...t, status: 'done' } });
+  } else {
+    t.status = t.status === 'done' ? 'todo' : 'done';
+    t.completedAt = t.status === 'done' ? Date.now() : null;
+    hooksToggle?.(b);
+  }
+  touch(obj);
 }
 
-export { todayKey, addDays };
+// ---------- version history ----------
+const SNAP_GAP = 10 * 60e3; const SNAP_MAX = 25;
+const sig = (o) => o.title + JSON.stringify(o.blocks);
+export function snapshot(obj, force = false) {
+  const h = (obj.history ||= []);
+  const last = h[h.length - 1];
+  const now = Date.now();
+  if (!force && last && now - last.at < SNAP_GAP) return;
+  const cur = sig(obj);
+  if (last && last.sig === cur) return;
+  if (!hasContent(obj.blocks) && !last) return;
+  h.push({ at: now, sig: cur, title: obj.title, blocks: structuredClone(obj.blocks) });
+  if (h.length > SNAP_MAX) h.shift();
+}
+export function restoreSnapshot(obj, i) {
+  snapshot(obj, true);
+  const v = obj.history[i]; if (!v) return;
+  obj.title = v.title; obj.blocks = structuredClone(v.blocks);
+  touch(obj, true);
+}

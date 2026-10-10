@@ -26,6 +26,14 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Linked references and unlinked mentions (with one-click linking) under every object.
 - Properties per type, favorites, quick find and create with Cmd/Ctrl+K, graph view.
 
+**Recent Capacities-style additions**
+- Right side panel: outline of headings, backlinks, outgoing links, note info.
+- Type views as Gallery, Table, List or Board (drag cards between status columns), with search, sort and tag filter.
+- Aliases: other names for an object. Links and backlinks resolve through them.
+- Recurring tasks: every day, weekday, week, month or year. Completing advances the due date.
+- Version history per object, with preview and restore.
+- Presentation mode: top-level bullets become slides.
+
 **Daily notes and calendar**
 - Daily note per date with an agenda card, tasks due today, and a highlight from your reading.
 - Month calendar and a mini calendar in the sidebar.
@@ -57,7 +65,7 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 
 ## Data
 
-Settings has JSON and Markdown export, and JSON import. Tokens are stored in the browser and are left out of the JSON export. Block-level undo is the browser's per-bullet undo; structural edits have no undo yet.
+Settings has **Download all as Markdown (.zip)**: one `.md` per object with YAML front matter, grouped by type, plus `Tasks.md`, `Calendar.md` and `Types.md`. A single-file `.md` and a JSON backup (with import) are also there. Each object's `...` menu downloads or copies its own `.md`. Tokens are stored in the browser and are left out of the JSON export. Block-level undo is the browser's per-bullet undo; structural edits have no undo yet.
 
 ## Layout
 
@@ -67,6 +75,7 @@ js/store.js         data model, search, backlinks, persistence
 js/outline.js       block editor
 js/views.js         daily, object, tasks, calendar, graph, settings
 js/integrations.js  Todoist, Readwise, calendar, reminders
+js/export.js        Markdown/zip export
 js/ics.js           iCalendar parser with recurrence expansion
 js/app.js           shell, router, sidebar, command palette
 ```

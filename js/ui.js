@@ -114,19 +114,22 @@ export function promptBox(title, value = '', ok = 'Save') {
 
 // ---------- date / reminder popover ----------
 import { addDays, todayKey, dateKey, parseKey, pad } from './util.js';
-export function datePopover({ anchor, due, remind, mode = 'due', onChange }) {
+export function datePopover({ anchor, due, remind, repeat, mode = 'due', onChange }) {
   const t = todayKey();
   const nextMon = (() => { const d = parseKey(t); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7)); return dateKey(d); })();
   const dueIn = h('input', { type: 'date', class: 'input', value: due || '' });
   const timeIn = h('input', { type: 'time', class: 'input', value: remind ? `${pad(new Date(remind).getHours())}:${pad(new Date(remind).getMinutes())}` : '09:00' });
   const remDateIn = h('input', { type: 'date', class: 'input', value: remind ? dateKey(new Date(remind)) : (due || t) });
   const el = h('div', { class: 'menu popover' });
+  const repSel = h('select', { class: 'input rep' }, h('option', { value: '' }, 'Does not repeat'),
+    [['daily', 'Every day'], ['weekdays', 'Every weekday'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['yearly', 'Every year']].map(([v, l]) => h('option', { value: v, selected: v === repeat }, l)));
   const done = (v) => { closeMenu(); onChange(v); };
   const q = (label, fn) => h('button', { class: 'pill-btn', onclick: fn }, label);
   if (mode === 'due') {
+    const D = (v) => done({ ...v, repeat: repSel.value || null });
     el.append(h('div', { class: 'menu-head' }, 'Due date'),
-      h('div', { class: 'pill-row' }, q('Today', () => done({ due: t })), q('Tomorrow', () => done({ due: addDays(t, 1) })), q('Next Mon', () => done({ due: nextMon })), q('+1 week', () => done({ due: addDays(t, 7) }))),
-      dueIn, h('div', { class: 'pop-actions' }, h('button', { class: 'btn small', onclick: () => done({ due: null }) }, 'Clear'), h('button', { class: 'btn small primary', onclick: () => done({ due: dueIn.value || null }) }, 'Set')));
+      h('div', { class: 'pill-row' }, q('Today', () => D({ due: t })), q('Tomorrow', () => D({ due: addDays(t, 1) })), q('Next Mon', () => D({ due: nextMon })), q('+1 week', () => D({ due: addDays(t, 7) }))),
+      dueIn, repSel, h('div', { class: 'pop-actions' }, h('button', { class: 'btn small', onclick: () => done({ due: null, repeat: null }) }, 'Clear'), h('button', { class: 'btn small primary', onclick: () => D({ due: dueIn.value || (repSel.value ? t : null) }) }, 'Set')));
   } else {
     const inH = (hrs) => { const d = new Date(Date.now() + hrs * 36e5); d.setSeconds(0, 0); return d.toISOString(); };
     const at = (k, hh) => { const d = parseKey(k); d.setHours(hh, 0, 0, 0); return d.toISOString(); };

@@ -6,9 +6,10 @@ import * as V from './views.js';
 import * as I from './integrations.js';
 import { showMenu, closeMenu, toast, modal } from './ui.js';
 import { currentOutline } from './outline.js';
+import * as hooks from './hooks.js';
 
 const $ = (s) => document.querySelector(s);
-let sidebarEl; let calCursor = null;
+let sidebarEl; let panelEl; let calCursor = null; let panelObj = null;
 
 // ---------- theme ----------
 function applyTheme() {
@@ -41,7 +42,8 @@ function route() {
     default: location.hash = '#/daily'; return;
   }
   if (!q.get('b')) scroller.scrollTop = 0;
-  paintSidebar();
+  panelObj = view === 'o' ? getObject(arg) : view === 'daily' ? ensureDaily(arg || todayKey()) : null;
+  paintSidebar(); paintPanel();
   document.body.classList.remove('sb-open');
 }
 
@@ -49,17 +51,27 @@ function route() {
 function buildShell() {
   document.body.innerHTML = '';
   sidebarEl = h('aside', { class: 'sidebar', id: 'sidebar' });
+  panelEl = h('aside', { class: 'panel', id: 'panel' });
   const top = h('header', { class: 'topbar' },
     h('button', { class: 'icon-btn', id: 'sb-toggle', title: 'Toggle sidebar', html: icon('panel', 18), onclick: toggleSidebar }),
     h('button', { class: 'icon-btn', title: 'Back', html: icon('arrowL', 17), onclick: () => history.back() }),
     h('button', { class: 'icon-btn', title: 'Forward', html: icon('arrowR', 17), onclick: () => history.forward() }),
     h('div', { class: 'top-spacer' }),
     h('div', { class: 'top-actions', id: 'top-actions' }),
-    h('button', { class: 'icon-btn', title: 'Search (⌘K)', html: icon('search', 17), onclick: () => openPalette() }));
+    h('button', { class: 'icon-btn', title: 'Search (⌘K)', html: icon('search', 17), onclick: () => openPalette() }),
+    h('button', { class: 'icon-btn', id: 'pn-toggle', title: 'Side panel', html: icon('panelR', 18), onclick: togglePanel }));
   const main = h('main', { class: 'main', id: 'main' }, top, h('div', { id: 'main-body' }));
-  document.body.append(h('div', { class: 'app' }, sidebarEl, main), h('div', { class: 'scrim', onclick: () => document.body.classList.remove('sb-open') }));
+  document.body.append(h('div', { class: 'app' }, sidebarEl, main, panelEl), h('div', { class: 'scrim', onclick: () => document.body.classList.remove('sb-open') }));
   V.bindChrome((nodes) => { const a = $('#top-actions'); a.textContent = ''; a.append(...nodes); });
   document.body.classList.toggle('sb-closed', !S.settings.sidebar);
+  document.body.classList.toggle('pn-closed', S.settings.panel === false);
+}
+function togglePanel() { S.settings.panel = S.settings.panel === false; document.body.classList.toggle('pn-closed', S.settings.panel === false); touch(); paintPanel(); }
+export function paintPanel() {
+  if (!panelEl) return;
+  document.body.classList.toggle('has-panel', !!panelObj);
+  panelEl.textContent = '';
+  if (panelObj && S.settings.panel !== false) panelEl.append(V.panelContent(panelObj));
 }
 function toggleSidebar() {
   if (innerWidth < 900) document.body.classList.toggle('sb-open');
@@ -185,7 +197,7 @@ function bindGlobal() {
   window.addEventListener('hashchange', route);
   const refresh = debounce(() => { const f = document.activeElement; if (f && f.matches?.('.blk-edit, .title-input, .prop-input, input, select')) { paintSidebar(); return; } route(); }, 30);
   window.addEventListener('folio:refresh', () => route());
-  subscribe(() => { paintSidebar(); });
+  subscribe(() => { paintSidebar(); paintPanel(); });
   setInterval(() => { if (document.visibilityState === 'visible' && !document.activeElement?.matches?.('textarea, input')) { if (parseHash().parts[0] === 'daily') route(); } }, 60000 * 5);
 }
 
@@ -201,10 +213,10 @@ function bindGlobal() {
     toast(`⏰ ${text}`, { ms: 0, actions: [
       { label: 'Open', fn: () => V.go(`#/o/${obj.id}?b=${block.id}`) },
       { label: 'Snooze 10m', fn: () => { block.task.remind = new Date(Date.now() + 10 * 60000).toISOString(); block.task.notified = false; touch(obj); } },
-      { label: 'Done', fn: () => { block.task.status = 'done'; block.task.completedAt = Date.now(); touch(obj); route(); } }] });
+      { label: 'Done', fn: () => { store.toggleTask(block, obj, (x) => hooks.todoistToggle(x)); route(); } }] });
   });
   // quiet background sync for connected services
   setTimeout(() => { if (I.todoistConnected() || S.settings.icsUrls.length) syncAll(false); }, 1500);
   if ('serviceWorker' in navigator) { /* offline support intentionally omitted */ }
-  window.folio = { store, V, I };
+  window.folio = { store, V, I, };
 })();
