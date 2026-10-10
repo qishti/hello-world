@@ -1,0 +1,7 @@
+{
+  "name": "folio-outliner",
+  "version": "0.1.0",
+  "description": "A calm, object-based outliner: daily notes, tasks, meeting notes, linking, Todoist, Readwise and calendar.",
+  "private": true,
+  "scripts": { "start": "node server.js" }
+}
