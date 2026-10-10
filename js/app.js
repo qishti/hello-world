@@ -39,11 +39,14 @@ function route() {
     case 'calendar': V.renderCalendar(arg); document.title = 'Calendar · Folio'; break;
     case 'graph': V.renderGraph(); document.title = 'Graph · Folio'; break;
     case 'type': V.renderType(arg); document.title = (S.types[arg]?.plural || 'Folio') + ' · Folio'; break;
+    case 'highlights': V.renderHighlights(); document.title = 'Highlights · Folio'; break;
     case 'settings': V.renderSettings(); document.title = 'Settings · Folio'; break;
     default: location.hash = '#/daily'; return;
   }
   if (!q.get('b')) scroller.scrollTop = 0;
   panelObj = view === 'o' ? getObject(arg) : view === 'daily' ? ensureDaily(arg || todayKey()) : null;
+  document.getElementById('hl-toggle')?.classList.toggle('gone', !(view === 'o' || view === 'daily'));
+  if (!(view === 'o' || view === 'daily')) V.toggleHighlightDrawer(false);
   paintSidebar(); paintPanel();
   document.body.classList.remove('sb-open');
 }
@@ -59,6 +62,7 @@ function buildShell() {
     h('button', { class: 'icon-btn', title: 'Forward', html: icon('arrowR', 17), onclick: () => history.forward() }),
     h('div', { class: 'top-spacer' }),
     h('div', { class: 'top-actions', id: 'top-actions' }),
+    h('button', { class: 'icon-btn', id: 'hl-toggle', title: 'Highlights drawer', html: icon('highlighter', 17), onclick: () => V.toggleHighlightDrawer() }),
     h('button', { class: 'icon-btn', title: 'Search (⌘K)', html: icon('search', 17), onclick: () => openPalette() }),
     h('button', { class: 'icon-btn', id: 'pn-toggle', title: 'Side panel', html: icon('panelR', 18), onclick: togglePanel }));
   const main = h('main', { class: 'main', id: 'main' }, top, h('div', { id: 'main-body' }));
@@ -106,6 +110,7 @@ export function paintSidebar() {
   if (!sidebarEl) return;
   const sc = sidebarEl.querySelector('.sb-scroll')?.scrollTop || 0;
   sidebarEl.textContent = '';
+  const hlCount = I.allHighlights().length;
   const linked = I.linkedTodoistIds();
   const dueToday = collectTasks().filter(({ block: b }) => b.task.status !== 'done' && b.task.due && b.task.due <= todayKey()).length + I.todoistOpen().filter((t) => !linked.has(t.id) && t.due && t.due <= todayKey()).length;
   sidebarEl.append(
@@ -113,7 +118,7 @@ export function paintSidebar() {
       h('button', { class: 'icon-btn', title: 'New object', html: icon('plus', 18), onclick: (e) => newMenu(e.currentTarget) })),
     h('button', { class: 'sb-search', onclick: () => openPalette(), html: `${icon('search', 15)}<span>Search or create</span><kbd>${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} K</kbd>` }),
     h('div', { class: 'sb-scroll' },
-      h('nav', { class: 'navs' }, navItem('calendar', 'Today', '#/daily'), navItem('check', 'Tasks', '#/tasks', dueToday ? h('b', { class: 'badge' }, dueToday) : null), navItem('calendar', 'Calendar', '#/calendar'), navItem('graph', 'Graph', '#/graph')),
+      h('nav', { class: 'navs' }, navItem('calendar', 'Today', '#/daily'), navItem('check', 'Tasks', '#/tasks', dueToday ? h('b', { class: 'badge' }, dueToday) : null), navItem('calendar', 'Calendar', '#/calendar'), navItem('highlighter', 'Highlights', '#/highlights', hlCount ? h('em', { class: 'count' }, hlCount) : null), navItem('graph', 'Graph', '#/graph')),
       miniCal(),
       S.favorites.length ? h('div', { class: 'sb-sec' }, h('div', { class: 'sb-label' }, 'Favorites'), S.favorites.map(getObject).filter(Boolean).map((o) => h('a', { class: `nav small${location.hash.includes(o.id) ? ' on' : ''}`, href: '#/o/' + o.id }, h('span', { class: 'type-ic sm', style: { '--c': typeOf(o).color }, html: icon(typeOf(o).icon, 12) }), h('span', { class: 'nav-label' }, o.title)))) : null,
       h('div', { class: 'sb-sec' }, h('div', { class: 'sb-label' }, 'Types'),
@@ -136,7 +141,7 @@ function openPalette() {
   let items = []; let sel = 0;
   const cmds = [
     { label: 'Go to today', icon: 'calendar', run: () => V.go('#/daily') }, { label: 'Open tasks', icon: 'check', run: () => V.go('#/tasks') }, { label: 'Open calendar', icon: 'calendar', run: () => V.go('#/calendar') },
-    { label: 'Open graph', icon: 'graph', run: () => V.go('#/graph') }, { label: 'Open settings', icon: 'sliders', run: () => V.go('#/settings') },
+    { label: 'Open highlights', icon: 'highlighter', run: () => V.go('#/highlights') }, { label: 'Open graph', icon: 'graph', run: () => V.go('#/graph') }, { label: 'Open settings', icon: 'sliders', run: () => V.go('#/settings') },
     { label: 'New meeting note', icon: 'users', run: () => V.newObject('meeting') }, { label: 'Import PDF…', icon: 'pdf', run: () => V.newObject('pdf') }, { label: 'Sync everything', icon: 'refresh', run: () => syncAll(true) },
     { label: 'Toggle dark mode', icon: 'moon', run: () => { S.settings.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(); touch(); paintSidebar(); } },
   ];
@@ -218,6 +223,9 @@ function bindGlobal() {
       { label: 'Snooze 10m', fn: () => { block.task.remind = new Date(Date.now() + 10 * 60000).toISOString(); block.task.notified = false; touch(obj); } },
       { label: 'Done', fn: () => { store.toggleTask(block, obj, (x) => hooks.todoistToggle(x)); route(); } }] });
   });
+  // Readwise background sync, like Heptabase: on open, then every 10 minutes while visible
+  const rw = async () => { try { const n = await I.autoReadwise(); if (n) { toast(`Readwise: ${n} new or updated highlight${n > 1 ? 's' : ''}`, { actions: [{ label: 'View', fn: () => V.go('#/highlights') }] }); paintSidebar(); } } catch { /* offline or rate limited */ } };
+  setTimeout(rw, 3000); setInterval(() => { if (document.visibilityState === 'visible') rw(); }, 10 * 60e3);
   // quiet background sync for connected services
   setTimeout(() => { if (I.todoistConnected() || S.settings.icsUrls.length) syncAll(false); }, 1500);
   if ('serviceWorker' in navigator) { /* offline support intentionally omitted */ }

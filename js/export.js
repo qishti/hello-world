@@ -1,5 +1,5 @@
 // Plain-Markdown export of everything in Folio: one .md per object, plus index files, in a .zip.
-import { S, allObjects, walk, collectTasks, typeOf, linksIn, getFile } from './store.js';
+import { S, allObjects, walk, collectTasks, typeOf, linksIn, getFile, locate } from './store.js';
 import { eventsBetween, eventTime, todoistOpen } from './integrations.js';
 import { dateKey, todayKey, download, relDate } from './util.js';
 
@@ -13,8 +13,9 @@ function taskSuffix(t) {
 export function blocksToMarkdown(blocks) {
   const lines = [];
   walk(blocks, (b, _p, depth) => {
-    if (!b.text.trim() && !b.children.length && !b.task && !b.img) return;
     const pad = '  '.repeat(depth);
+    if (b.ref) { const r = locate(b.ref); if (r) lines.push(`${pad}- > ${r.block.text.replace(/\n/g, ' ')} ([[${r.obj.title}]]${r.block.pdf ? ', p. ' + r.block.pdf.page : ''})`); return; }
+    if (!b.text.trim() && !b.children.length && !b.task && !b.img) return;
     const text = b.text.replace(/\n/g, b.type === 'code' ? '\n' : ' ');
     if (b.type === 'code') {
       lines.push(`${pad}- \`\`\``, ...text.split('\n').map((l) => `${pad}  ${l}`), `${pad}  \`\`\``);
@@ -23,7 +24,7 @@ export function blocksToMarkdown(blocks) {
     if (b.img) { lines.push(`${pad}- ![snapshot${b.pdf ? ' p. ' + b.pdf.page : ''}](Files/${b.img}.png)`); if (!text) return; }
     const head = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', callout: '> [!note] ' }[b.type] || '';
     const box = b.task ? (b.task.status === 'done' ? '[x] ' : '[ ] ') : '';
-    lines.push(`${pad}- ${box}${head}${text}${b.pdf && !b.img ? ` (p. ${b.pdf.page})` : ''}${b.task ? taskSuffix(b.task) : ''}`.replace(/\s+$/, ''));
+    lines.push(`${pad}- ${box}${head}${text}${b.pdf && !b.img ? ` (p. ${b.pdf.page})` : ''}${b.hlTags?.length ? ' ' + b.hlTags.map((t) => '#' + t).join(' ') : ''}${b.task ? taskSuffix(b.task) : ''}`.replace(/\s+$/, ''));
   });
   return lines.join('\n');
 }

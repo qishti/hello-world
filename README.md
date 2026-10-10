@@ -34,6 +34,13 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Version history per object, with preview and restore.
 - Presentation mode: top-level bullets become slides.
 
+**Readwise highlights, Heptabase style**
+- Highlights library: every highlight from Readwise and your PDFs in one place, grouped by source, with search and filters for source, color, tag and origin.
+- Drawer: open it from the toolbar while writing. Drag a highlight into any note, or press Add. It stays linked to its source and updates if you edit it there.
+- Background sync on open and every 10 minutes, with a toast for new highlights. Manual mode is in Settings.
+- Your edits win: highlights you edit, annotate or embed are never overwritten or removed by a later sync. Unedited ones follow Readwise, including deletions.
+- Readwise color and tags come across; notes become child bullets.
+
 **PDF reader**
 - Import a PDF from the sidebar `+`, the command palette, the PDFs page, or by dropping a file anywhere.
 - Page-by-page reader with zoom, arrow-key paging and your place remembered.

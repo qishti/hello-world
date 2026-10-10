@@ -193,22 +193,53 @@ function upsertSource(bk) {
     o = createObject({ type: 'source', title: t, blocks: [], props: { rwId } });
   }
   Object.assign(o.props, { author: bk.author || '', category: CAT[bk.category] || 'Other', url: bk.source_url || bk.unique_url || '', cover: bk.cover_image_url || '', readwise: bk.readwise_url || '' });
-  const have = new Set(); walk(o.blocks, (b) => b.rw && have.add(b.rw));
-  let added = 0;
-  for (const h of bk.highlights || []) {
-    const id = String(h.id);
-    if (have.has(id)) {
-      walk(o.blocks, (b) => { if (b.rw === id && h.note !== undefined) { const nb = b.children.find((c) => c.rwNote); if (h.note && nb) nb.text = h.note; else if (h.note && !nb) b.children.push(newBlock(h.note, { rwNote: true })); } });
+  let added = 0; let changed = 0;
+  const findHl = (id) => { let f = null; walk(o.blocks, (b) => { if (b.rw === id) f = b; }); return f; };
+  const drop = (arr, blk) => { const i = arr.indexOf(blk); if (i >= 0) { arr.splice(i, 1); return true; } for (const x of arr) if (drop(x.children, blk)) return true; return false; };
+  for (const hl of bk.highlights || []) {
+    const id = String(hl.id); const f = findHl(id);
+    const tags = (hl.tags || []).map((t) => (t.name || t).toString().replace(/\s+/g, '-')).filter(Boolean);
+    // Highlights you have edited or annotated in Folio are never overwritten or removed.
+    if (hl.is_deleted) {
+      if (f && f.text === (f.rwText ?? f.text) && !f.children.some((c) => !c.rwNote && c.text.trim())) { drop(o.blocks, f); changed++; }
       continue;
     }
-    const kids = h.note ? [newBlock(h.note, { rwNote: true })] : [];
-    o.blocks.push(newBlock(h.text, { type: 'quote', rw: id, children: kids, loc: h.location || null, at: h.highlighted_at || null }));
+    if (f) {
+      if (f.text === (f.rwText ?? f.text) && f.text !== hl.text) { f.text = hl.text; changed++; }
+      f.rwText = hl.text;
+      const nb = f.children.find((c) => c.rwNote);
+      if (hl.note) { if (!nb) f.children.unshift(newBlock(hl.note, { rwNote: true, rwText: hl.note })); else { if (nb.text === (nb.rwText ?? nb.text)) nb.text = hl.note; nb.rwText = hl.note; } }
+      else if (nb && nb.text === (nb.rwText ?? nb.text)) f.children.splice(f.children.indexOf(nb), 1);
+      f.color = hl.color || f.color; f.hlTags = tags; f.loc = hl.location || f.loc;
+      continue;
+    }
+    const kids = hl.note ? [newBlock(hl.note, { rwNote: true, rwText: hl.note })] : [];
+    o.blocks.push(newBlock(hl.text, { type: 'quote', rw: id, rwText: hl.text, children: kids, loc: hl.location || null, at: hl.highlighted_at || null, color: hl.color || null, hlTags: tags }));
     added++;
   }
+  o.blocks = o.blocks.filter((b, i, arr) => b.text || b.children.length || b.rw || arr.length === 1);
   if (!o.blocks.length) o.blocks.push(newBlock(''));
   touch(o, true);
-  return added;
+  return added + changed;
 }
+/** Quiet incremental sync; returns the number of new or changed highlights. */
+export async function autoReadwise() {
+  if (!readwiseConnected() || S.settings.readwiseAuto === false) return 0;
+  const r = await syncReadwise(); return r.highlights;
+}
+/** All highlights from Readwise sources and PDFs, as {block, obj, note, kind}. */
+export function allHighlights() {
+  const out = [];
+  for (const o of Object.values(S.objects)) {
+    if (o.type !== 'source' && o.type !== 'pdf') continue;
+    walk(o.blocks, (b) => {
+      if (b.rwNote || b.img || !b.text.trim()) return;
+      if (b.rw || (b.pdf && b.pdf.color !== 'snap')) out.push({ block: b, obj: o, note: (b.children.find((c) => c.rwNote) || b.children[0])?.text || '', kind: b.rw ? 'readwise' : 'pdf' });
+    });
+  }
+  return out;
+}
+
 export function randomHighlight() {
   const pool = [];
   for (const o of objectsOfType('source')) walk(o.blocks, (b) => { if (b.rw && b.text.length > 30 && b.text.length < 420) pool.push({ o, b }); });

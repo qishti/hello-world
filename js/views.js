@@ -28,6 +28,7 @@ export function renderObject(id, focusBlock) {
   const root = main(); root.textContent = '';
   if (!obj) { root.append(h('div', { class: 'page' }, h('div', { class: 'empty' }, h('h2', null, 'Object not found'), h('p', null, 'It may have been deleted.'), h('button', { class: 'btn', onclick: () => go('#/daily') }, 'Go to today')))); return; }
   if (obj.type === 'daily') return renderDaily(obj.date);
+  setViewObj(obj);
   const t = typeOf(obj);
   const page = h('div', { class: 'page' });
   setActions(objActions(obj));
@@ -150,7 +151,7 @@ function refsSection(obj) {
 // ======================================================================
 export function renderDaily(key) {
   key ||= todayKey();
-  const obj = ensureDaily(key);
+  const obj = ensureDaily(key); setViewObj(obj);
   const root = main(); root.textContent = '';
   const d = parseKey(key); const isToday = key === todayKey();
   setActions([h('button', { class: 'btn small', onclick: () => go('#/daily') }, 'Today')]);
@@ -507,8 +508,10 @@ export function renderSettings() {
   // Readwise
   const rwIn = h('input', { class: 'input grow', type: 'password', placeholder: 'Readwise access token', value: S.settings.readwiseToken });
   const rwMsg = h('div', { class: 'set-msg' });
-  page.append(sec('Readwise', 'Get your token at readwise.io/access_token. Books, articles and highlights import as Source objects; highlights are quote bullets you can link and annotate.',
+  const rwAuto = h('div', { class: 'seg' }, [['on', 'Auto'], ['off', 'Manual']].map(([k, l]) => h('button', { class: (S.settings.readwiseAuto !== false) === (k === 'on') ? 'on' : '', onclick: () => { S.settings.readwiseAuto = k === 'on'; save(); renderSettings(); } }, l)));
+  page.append(sec('Readwise', 'Get your token at readwise.io/access_token. Books, articles and highlights import as Source objects; highlights are quote bullets you can link and annotate. New and changed highlights sync in the background every few minutes. Highlights you edit or annotate in Folio are never overwritten or removed.',
     h('div', { class: 'set-form' }, rwIn, h('button', { class: 'btn primary', onclick: async (e) => { S.settings.readwiseToken = rwIn.value.trim(); save(); const b = e.currentTarget; b.disabled = true; rwMsg.className = 'set-msg'; try { const r = await I.syncReadwise((bk, hl) => { rwMsg.textContent = `Imported ${bk} sources…`; }); rwMsg.textContent = `Done · ${r.books} sources updated, ${r.highlights} new highlights.`; rwMsg.className = 'set-msg ok'; } catch (err) { rwMsg.textContent = err.message; rwMsg.className = 'set-msg err'; } b.disabled = false; } }, 'Connect & import')),
+    row(`Keep in sync${S.cache.readwiseSyncedAt ? ' · last ' + timeAgo(Date.parse(S.cache.readwiseSyncedAt)) : ''}`, rwAuto),
     h('div', { class: 'set-actions' }, h('button', { class: 'btn small ghost', onclick: () => { S.cache.readwiseSyncedAt = null; save(); rwMsg.textContent = 'Next import will fetch everything again.'; } }, 'Reset sync cursor')), rwMsg));
 
   // Proxy
@@ -602,3 +605,88 @@ export function panelContent(obj) {
     h('div', { class: 'pn-actions' }, h('button', { class: 'btn small', onclick: () => present(obj), html: `${icon('play', 12)}<span>Present</span>` }), h('button', { class: 'btn small', onclick: () => historyModal(obj), html: `${icon('history', 12)}<span>History</span>` }))));
   return wrap;
 }
+
+// ======================================================================
+// Highlights library (Readwise + PDF) and the drawer used while writing
+// ======================================================================
+const HL_COL = { yellow: '#facc15', green: '#4ade80', blue: '#60a5fa', pink: '#f472b6', orange: '#fb923c', purple: '#c084fc', red: '#f87171' };
+const hlColor = (it) => HL_COL[it.block.color] || HL_COL[it.block.pdf?.color] || HL_COL.yellow;
+let viewObj = null;
+export const setViewObj = (o) => { viewObj = o; };
+
+/** Insert a live reference to a highlight into the open note (after the block being edited, else at the end). */
+export function insertRef(blockId) {
+  const o = viewObj; if (!o) return toast('Open a note first, then add highlights to it.');
+  const nb = newBlock('', { ref: blockId });
+  const cur = currentOutline();
+  const rec = cur && cur.obj === o && cur.editId ? locate(cur.editId) : null;
+  if (rec) rec.arr.splice(rec.i + 1, 0, nb);
+  else { const last = o.blocks[o.blocks.length - 1]; if (last && !last.text && !last.children.length && !last.task) o.blocks.splice(o.blocks.length - 1, 1, nb, newBlock('')); else o.blocks.push(nb); }
+  touch(o, true); rerender(); toast(`Added to “${o.title}”`);
+}
+
+function hlCardEl(it, { showSource = true, draggable = true } = {}) {
+  const b = it.block; const st = typeOf(it.obj);
+  const card = h('div', { class: 'hl-card', style: { '--hl': hlColor(it) }, draggable: draggable ? 'true' : null },
+    h('div', { class: 'hl-text', html: renderInline(b.text) }),
+    it.note ? h('div', { class: 'hl-note', html: renderInline(it.note) }) : null,
+    h('div', { class: 'hl-foot' },
+      showSource ? h('a', { class: 'hl-src', style: { '--c': st.color }, onclick: () => go(`#/o/${it.obj.id}?b=${b.id}`), html: `${icon(st.icon, 12)}<span>${esc(it.obj.title)}</span>` }) : null,
+      b.pdf ? h('span', { class: 'hl-meta' }, `p. ${b.pdf.page}`) : b.loc ? h('span', { class: 'hl-meta' }, `loc. ${b.loc}`) : null,
+      (b.hlTags || []).map((t) => h('span', { class: 'hl-tag' }, '#' + t)),
+      h('span', { class: 'top-spacer' }),
+      h('button', { class: 'hl-add', title: 'Add to the open note', html: `${icon('plus', 12)}<span>Add</span>`, onclick: (e) => { e.stopPropagation(); insertRef(b.id); } })));
+  card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('application/x-folio-ref', b.id); e.dataTransfer.setData('text/plain', b.text); e.dataTransfer.effectAllowed = 'copy'; });
+  return card;
+}
+
+function highlightBrowser({ compact }) {
+  const wrap = h('div', { class: `hlb${compact ? ' compact' : ''}` });
+  let q = ''; let src = ''; let color = ''; let tag = ''; let kind = '';
+  const all = I.allHighlights();
+  const sources = [...new Map(all.map((x) => [x.obj.id, x.obj])).values()].sort((a, b) => a.title.localeCompare(b.title));
+  const tags = [...new Set(all.flatMap((x) => x.block.hlTags || []))].sort();
+  const list = h('div', { class: 'hl-list' });
+  const paint = () => {
+    list.textContent = '';
+    const items = all.filter((x) => (!src || x.obj.id === src) && (!color || (x.block.color || x.block.pdf?.color || 'yellow') === color) && (!tag || (x.block.hlTags || []).includes(tag)) && (!kind || x.kind === kind)
+      && (!q || (x.block.text + ' ' + x.note + ' ' + x.obj.title).toLowerCase().includes(q)));
+    if (!items.length) { list.append(h('div', { class: 'empty small' }, h('p', null, all.length ? 'No highlights match.' : 'No highlights yet. Connect Readwise in Settings, or highlight text in a PDF.'))); return; }
+    if (compact) { items.slice(0, 120).forEach((it) => list.append(hlCardEl(it))); return; }
+    const groups = new Map(); items.forEach((it) => { if (!groups.has(it.obj.id)) groups.set(it.obj.id, []); groups.get(it.obj.id).push(it); });
+    [...groups.values()].sort((a, b) => Math.max(...b.map((x) => Date.parse(x.block.at) || 0)) - Math.max(...a.map((x) => Date.parse(x.block.at) || 0))).forEach((g) => {
+      const o = g[0].obj; const st = typeOf(o);
+      list.append(h('section', { class: 'hl-group' },
+        h('div', { class: 'hl-ghead', onclick: () => go('#/o/' + o.id) }, o.props?.cover ? h('img', { src: o.props.cover, alt: '', loading: 'lazy', onerror: (e) => e.target.remove() }) : typeBadge(st), h('div', null, h('div', { class: 'hl-gtitle' }, o.title), h('div', { class: 'hl-gsub' }, `${o.props?.author ? o.props.author + ' · ' : ''}${g.length} highlight${g.length > 1 ? 's' : ''}`))),
+        h('div', { class: 'hl-gbody' }, g.map((it) => hlCardEl(it, { showSource: false })))));
+    });
+  };
+  const sel = (label, opts, set) => h('select', { class: 'input', onchange: (e) => { set(e.target.value); paint(); } }, h('option', { value: '' }, label), opts.map(([v, l]) => h('option', { value: v }, l)));
+  wrap.append(h('div', { class: 'hl-tools' },
+    h('input', { class: 'input search', placeholder: 'Search highlights…', oninput: (e) => { q = e.target.value.toLowerCase(); paint(); } }),
+    sel('All sources', sources.map((o) => [o.id, o.title]), (v) => { src = v; }),
+    ...(compact ? [] : [sel('All colors', Object.keys(HL_COL).map((c) => [c, c[0].toUpperCase() + c.slice(1)]), (v) => { color = v; }), ...(tags.length ? [sel('All tags', tags.map((t) => [t, '#' + t]), (v) => { tag = v; })] : []), sel('Readwise + PDF', [['readwise', 'Readwise'], ['pdf', 'PDFs']], (v) => { kind = v; })])), list);
+  paint(); return wrap;
+}
+
+export function renderHighlights() {
+  const root = main(); root.textContent = ''; setActions([]); setViewObj(null);
+  const total = I.allHighlights().length;
+  const page = h('div', { class: 'page wide' }, h('div', { class: 'view-head' }, h('h1', null, 'Highlights', h('span', { class: 'muted' }, ` ${total}`)),
+    I.readwiseConnected() ? h('button', { class: 'btn small', html: `${icon('refresh', 14)}<span>Sync Readwise</span>`, onclick: async (e) => { e.currentTarget.disabled = true; try { const r = await I.syncReadwise(); toast(`Readwise synced · ${r.highlights} new or changed`); } catch (err) { toast(err.message, { kind: 'warn', ms: 7000 }); } renderHighlights(); } }) : h('button', { class: 'btn small', onclick: () => go('#/settings') }, 'Connect Readwise')),
+    h('p', { class: 'muted small hl-hint' }, 'Open any note and use the highlights drawer, or drag a card into a note. A dragged highlight stays linked to its source and shows your edits.'),
+    highlightBrowser({ compact: false }));
+  root.append(page);
+}
+
+export function toggleHighlightDrawer(force) {
+  const ex = document.getElementById('hl-drawer');
+  if (force === false || (ex && force !== true)) { ex?.remove(); document.body.classList.remove('hl-open'); return; }
+  if (ex) return;
+  const d = h('aside', { class: 'hl-drawer', id: 'hl-drawer' },
+    h('div', { class: 'hl-dhead' }, h('span', { html: `${icon('highlighter', 16)}<b>Highlights</b>` }), h('button', { class: 'icon-btn small', html: icon('x', 15), onclick: () => toggleHighlightDrawer() })),
+    h('div', { class: 'hl-dsub' }, 'Drag a highlight into your note, or press Add.'), highlightBrowser({ compact: true }));
+  document.body.append(d); document.body.classList.add('hl-open');
+}
+import { currentOutline } from './outline.js';
+import { locate } from './store.js';

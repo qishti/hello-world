@@ -80,12 +80,28 @@ class Outline {
       ? h('button', { class: `check ${b.task.status}`, tabindex: '-1', title: 'Toggle task', onclick: () => this.toggleTask(b), html: b.task.status === 'done' ? icon('check', 12) : '' })
       : h('span', { class: 'bullet' + (b.collapsed && b.children.length ? ' folded' : '') }, h('i'));
     const body = h('div', { class: 'blk-body' });
-    if (b.img) body.append(this.imgEl(b));
-    body.append(this.view(b, lone));
+    if (b.ref) body.append(this.embedEl(b));
+    else {
+      if (b.img) body.append(this.imgEl(b));
+      body.append(this.view(b, lone));
+    }
     if (b.pdf && b.pdf.color !== 'snap') el.style.setProperty('--hl', HL[b.pdf.color] || HL.yellow);
-    const chips = this.chips(b); if (chips) body.append(chips);
+    const chips = b.ref ? null : this.chips(b); if (chips) body.append(chips);
     el.append(h('div', { class: 'blk-row' }, handle, toggle, marker, body));
     if (b.children.length && !b.collapsed) el.append(h('div', { class: 'blk-children' }, this.list(b.children)));
+    return el;
+  }
+
+  /** A live reference to a highlight (or any block) elsewhere. Edit the source to change it everywhere. */
+  embedEl(b) {
+    const rec = locate(b.ref);
+    if (!rec) return h('div', { class: 'embed gone' }, 'This highlight is no longer available.');
+    const t = rec.block; const src = rec.obj; const st = typeOf(src);
+    const note = (t.children.find((c) => c.rwNote) || t.children[0])?.text;
+    const el = h('div', { class: 'embed', style: { '--hl': HL[t.color] || (t.pdf ? HL[t.pdf.color] : null) || HL.yellow } },
+      h('div', { class: 'embed-text', html: renderInline(t.text) }),
+      note ? h('div', { class: 'embed-note', html: renderInline(note) }) : null,
+      h('a', { class: 'embed-src', style: { '--c': st.color }, html: `${icon(st.icon, 12)}<span>${esc(src.title)}</span>${t.pdf ? `<em>p. ${t.pdf.page}</em>` : t.loc ? `<em>loc. ${esc(t.loc)}</em>` : ''}`, onclick: () => { location.hash = `#/o/${src.id}?b=${t.id}`; } }));
     return el;
   }
 
@@ -129,6 +145,7 @@ class Outline {
   chips(b) {
     const out = [];
     if (b.pdf) out.push(h('button', { class: 'chip pdfpage', tabindex: '-1', title: 'Go to page', html: `${icon('pdf', 11)}<span>p. ${b.pdf.page}</span>`, onclick: () => window.dispatchEvent(new CustomEvent('folio:pdfgoto', { detail: { obj: this.obj, page: b.pdf.page } })) }));
+    if (b.hlTags?.length) b.hlTags.forEach((t) => out.push(h('span', { class: 'chip tagchip', html: `#${esc(t)}` })));
     if (!b.task) return out.length ? h('div', { class: 'chips' }, out) : null;
     const t = b.task;
     const overdue = t.due && t.status !== 'done' && t.due < todayKey();
@@ -333,7 +350,7 @@ class Outline {
     const out = []; const rec = (arr) => arr.forEach((b) => { out.push(b); if (!b.collapsed) rec(b.children); }); rec(this.blocks); return out;
   }
   nav(b, d, toEnd, toStart) {
-    const v = this.visible(); const i = v.indexOf(b); const n = v[i + d]; if (!n) return;
+    const v = this.visible().filter((x) => !x.ref); const i = v.indexOf(b); const n = v[i + d]; if (!n) return;
     this.edit(n.id, toStart ? 0 : (toEnd || d < 0) ? n.text.length : Math.min(this.ta.selectionStart, n.text.length));
   }
 
@@ -379,7 +396,7 @@ class Outline {
     if (b.type !== 'text') { b.type = 'text'; this.changed(); return this.render({ id: b.id, pos: 0 }); }
     const v = this.visible(); const i = v.indexOf(b); const prev = v[i - 1];
     b.text = this.ta.value;
-    if (!prev) return;
+    if (!prev || prev.ref) return;
     const at = prev.text.length;
     prev.text += b.text;
     const rec = locate(b.id); rec.arr.splice(rec.i, 1);
@@ -388,7 +405,7 @@ class Outline {
   }
   mergeNext(b) {
     const v = this.visible(); const nx = v[v.indexOf(b) + 1]; b.text = this.ta.value;
-    if (!nx) return;
+    if (!nx || nx.ref) return;
     const at = b.text.length; b.text += nx.text;
     const rec = locate(nx.id); rec.arr.splice(rec.i, 1);
     if (nx.children.length) b.children.push(...nx.children);
@@ -479,24 +496,36 @@ class Outline {
     e.dataTransfer.setDragImage(el.querySelector('.blk-row'), 0, 10);
     setTimeout(() => el.classList.add('dragging'), 0);
   }
+  isExt(e) { return [...(e.dataTransfer?.types || [])].includes('application/x-folio-ref'); }
   dropInfo(e) {
-    const row = e.target.closest?.('.blk-row'); if (!row || !this.drag) return null;
+    const ext = this.isExt(e);
+    const tail = e.target.closest?.('.outline-tail');
+    if (ext && tail) return { el: tail, id: null, where: 'tail', ext };
+    const row = e.target.closest?.('.blk-row'); if (!row || (!this.drag && !ext)) return null;
     const el = row.parentElement; const id = el.dataset.id;
-    if (id === this.drag.id) return null;
-    let inside = false; walk(this.drag.children, (x) => { if (x.id === id) inside = true; });
-    if (inside) return null;
+    if (!ext) {
+      if (id === this.drag.id) return null;
+      let inside = false; walk(this.drag.children, (x) => { if (x.id === id) inside = true; });
+      if (inside) return null;
+    }
     const r = row.getBoundingClientRect(); const y = (e.clientY - r.top) / r.height;
-    return { el, id, where: y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'child' };
+    return { el, id, ext, where: y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'child' };
   }
   onDragOver(e) {
     const d = this.dropInfo(e); this.clearDrop();
     if (!d) return;
-    e.preventDefault(); d.el.classList.add('drop-' + d.where);
+    e.preventDefault(); d.el.classList.add('drop-' + (d.where === 'tail' ? 'after' : d.where));
   }
   clearDrop() { this.host.querySelectorAll('.drop-before, .drop-after, .drop-child, .dragging').forEach((n) => n.classList.remove('drop-before', 'drop-after', 'drop-child', 'dragging')); }
   onDrop(e) {
     const d = this.dropInfo(e); this.clearDrop(); if (!d) return;
     e.preventDefault();
+    if (d.ext) {
+      const nb = newBlock('', { ref: e.dataTransfer.getData('application/x-folio-ref') });
+      if (d.where === 'tail') this.blocks.push(nb);
+      else { const t = locate(d.id); if (d.where === 'child') { t.block.children.push(nb); t.block.collapsed = false; } else t.arr.splice(t.i + (d.where === 'after' ? 1 : 0), 0, nb); }
+      this.changed(true); this.render(); return;
+    }
     const b = this.drag; this.drag = null;
     const src = locate(b.id); src.arr.splice(src.i, 1);
     const t = locate(d.id);
