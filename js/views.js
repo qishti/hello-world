@@ -514,6 +514,30 @@ export function renderSettings() {
     row(`Keep in sync${S.cache.readwiseSyncedAt ? ' · last ' + timeAgo(Date.parse(S.cache.readwiseSyncedAt)) : ''}`, rwAuto),
     h('div', { class: 'set-actions' }, h('button', { class: 'btn small ghost', onclick: () => { S.cache.readwiseSyncedAt = null; save(); rwMsg.textContent = 'Next import will fetch everything again.'; } }, 'Reset sync cursor')), rwMsg));
 
+  // Email in
+  const emSec = h('div', { class: 'set-body' }); const emMsg = h('div', { class: 'set-msg' });
+  const paintEmail = async () => {
+    emSec.textContent = '';
+    if (!runtime.proxy) { emSec.append(h('div', { class: 'muted small' }, 'Run “node server.js” and open Folio from it to use email-in.')); return; }
+    let st; try { st = await I.emailStatus(); } catch (e) { emSec.append(h('div', { class: 'set-msg err' }, e.message)); return; }
+    if (!st.available) { emSec.append(h('div', { class: 'set-msg err' }, 'Email-in needs two small packages. In the Folio folder run:  npm install   then restart the server.')); return; }
+    const host = h('input', { class: 'input', placeholder: 'IMAP host', value: st.host || 'imap.gmail.com' });
+    const user = h('input', { class: 'input grow', placeholder: 'you@gmail.com', value: st.user });
+    const pass = h('input', { class: 'input grow', type: 'password', placeholder: st.configured ? 'App password saved. Leave blank to keep it.' : 'App password' });
+    const box = h('input', { class: 'input', placeholder: 'Folder or label', value: st.mailbox || 'Folio' });
+    const plus = /^([^@+]+)@gmail\.com$/i.exec(st.user || '');
+    emSec.append(
+      h('div', { class: 'set-form' }, user, pass), h('div', { class: 'set-form' }, host, box,
+        h('button', { class: 'btn primary', onclick: async (e) => { e.currentTarget.disabled = true; emMsg.className = 'set-msg'; emMsg.textContent = 'Connecting…'; try { await I.emailSave({ host: host.value, user: user.value, pass: pass.value, mailbox: box.value }); emMsg.textContent = 'Connected.'; emMsg.className = 'set-msg ok'; paintEmail(); } catch (err) { emMsg.textContent = err.message; emMsg.className = 'set-msg err'; e.currentTarget.disabled = false; } } }, st.configured ? 'Save & test' : 'Connect')),
+      st.configured ? h('div', { class: 'set-actions' },
+        h('button', { class: 'btn', html: `${icon('refresh', 14)}<span>Check now</span>`, onclick: async () => { emMsg.className = 'set-msg'; emMsg.textContent = 'Checking…'; try { const r = await I.pullEmail({ poll: true }); emMsg.textContent = r.n ? `Added ${r.n} email${r.n > 1 ? 's' : ''} to your daily notes.` : 'No new email.'; emMsg.className = 'set-msg ok'; if (r.status?.error) { emMsg.textContent = r.status.error; emMsg.className = 'set-msg err'; } } catch (err) { emMsg.textContent = err.message; emMsg.className = 'set-msg err'; } } }),
+        h('button', { class: 'btn ghost', onclick: async () => { await I.emailDisconnect(); paintEmail(); } }, 'Disconnect'),
+        h('span', { class: 'muted small' }, st.lastCheck ? `Last checked ${timeAgo(st.lastCheck)}${st.error ? ' · ' + st.error : ''}` : 'Not checked yet')) : null,
+      st.configured && plus ? h('div', { class: 'set-msg ok' }, `Send or forward to ${plus[1]}+folio@gmail.com`) : null);
+  };
+  page.append(sec('Email in', 'Email items to yourself and they land in that day’s daily note as bullets tagged #email. Start a subject with “todo:” to make it a task. Setup for Gmail: turn on IMAP, make an app password (myaccount.google.com/apppasswords), create a label called Folio, and add a filter that labels mail sent to you+folio@gmail.com with Folio and skips the inbox. Other providers work with any IMAP folder. The password is kept only on this computer, in a local file.', emSec, emMsg));
+  paintEmail();
+
   // Proxy
   page.append(sec('Network', runtime.proxy ? 'Local proxy detected. Readwise and calendar feeds are routed through it, which avoids browser CORS limits.' : 'Todoist works directly from the browser. Readwise and most calendar feeds need the small local proxy: run “node server.js” and open Folio from it.',
     row('Proxy', h('span', { class: `status ${runtime.proxy ? 'on' : ''}` }, runtime.proxy ? 'Connected' : 'Not running'))));

@@ -7,6 +7,7 @@ No build step and no dependencies. Data stays in your browser (IndexedDB).
 ## Run it
 
 ```sh
+npm install           # once; only needed for email-in
 node server.js        # http://localhost:8787
 ```
 
@@ -33,6 +34,13 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Recurring tasks: every day, weekday, week, month or year. Completing advances the due date.
 - Version history per object, with preview and restore.
 - Presentation mode: top-level bullets become slides.
+
+**Email in**
+- Email or forward items to yourself. Each one lands in that day's daily note as a bullet tagged `#email`, with the body as child bullets. Quoted replies and signatures are trimmed, links and attachment names are listed.
+- A subject starting with `todo:` becomes a task due that day.
+- The tag page `#email` collects everything you have emailed in.
+- How it works: `node server.js` checks an IMAP folder or label every 2 minutes and holds new mail until Folio picks it up, so mail is not lost while the browser is closed. Gmail setup is in Settings > Email in: turn on IMAP, make an app password, create a label `Folio`, and filter mail to `you+folio@gmail.com` into it.
+- Your app password is stored only in `.folio-mail.json` on your computer. The server listens on localhost only. Attachments are not imported.
 
 **Readwise highlights, Heptabase style**
 - Highlights library: every highlight from Readwise and your PDFs in one place, grouped by source, with search and filters for source, color, tag and origin.
@@ -94,6 +102,7 @@ js/integrations.js  Todoist, Readwise, calendar, reminders
 js/reader.js        PDF reader
 vendor/             PDF.js
 js/export.js        Markdown/zip export
+mail.js             email-in (IMAP) for the local server
 js/ics.js           iCalendar parser with recurrence expansion
 js/app.js           shell, router, sidebar, command palette
 ```

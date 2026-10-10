@@ -226,6 +226,9 @@ function bindGlobal() {
   // Readwise background sync, like Heptabase: on open, then every 10 minutes while visible
   const rw = async () => { try { const n = await I.autoReadwise(); if (n) { toast(`Readwise: ${n} new or updated highlight${n > 1 ? 's' : ''}`, { actions: [{ label: 'View', fn: () => V.go('#/highlights') }] }); paintSidebar(); } } catch { /* offline or rate limited */ } };
   setTimeout(rw, 3000); setInterval(() => { if (document.visibilityState === 'visible') rw(); }, 10 * 60e3);
+  // Email-in: file any queued mail on open, then every 90 seconds while visible
+  const em = async () => { if (!runtime.proxy) return; try { const st = await I.emailStatus(); if (!st.configured) return; const r = await I.pullEmail(); if (r.n) { toast(`${r.n} new email${r.n > 1 ? 's' : ''} added to your daily note`, { actions: [{ label: 'View', fn: () => V.go('#/o/' + ensureObject('email', 'tag').id) }] }); route(); } } catch { /* server offline */ } };
+  setTimeout(em, 2500); setInterval(() => { if (document.visibilityState === 'visible') em(); }, 90000);
   // quiet background sync for connected services
   setTimeout(() => { if (I.todoistConnected() || S.settings.icsUrls.length) syncAll(false); }, 1500);
   if ('serviceWorker' in navigator) { /* offline support intentionally omitted */ }

@@ -3,5 +3,11 @@
   "version": "0.1.0",
   "description": "A calm, object-based outliner: daily notes, tasks, meeting notes, linking, Todoist, Readwise and calendar.",
   "private": true,
-  "scripts": { "start": "node server.js" }
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "imapflow": "^2.4.0",
+    "mailparser": "^3.9.38"
+  }
 }

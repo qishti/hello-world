@@ -1,4 +1,4 @@
-import { S, runtime, touch, walk, createObject, findByTitle, newBlock, meetingBlocks, collectTasks, objectsOfType, ensureObject, getObject } from './store.js';
+import { S, runtime, touch, walk, createObject, findByTitle, newBlock, meetingBlocks, collectTasks, objectsOfType, ensureObject, getObject, ensureDaily } from './store.js';
 import { parseICS, expand } from './ics.js';
 import { dateKey, todayKey, fmtTime, parseKey } from './util.js';
 import { toast } from './ui.js';
@@ -271,3 +271,53 @@ export function startReminders(onFire) {
 }
 
 hooks.bind({ todoistSend, todoistToggle, todoistUpdateDue, askNotify });
+
+// ---------- Email in (IMAP via the local server) ----------
+const EMAIL_TAG = 'email';
+async function mailApi(path, { method = 'GET', body } = {}) {
+  if (!runtime.proxy) throw new Error('Email-in needs the local server. Run `node server.js` and open Folio from it.');
+  const r = await fetch(`${runtime.proxyBase}/mail/${path}`, { method, headers: { 'x-folio': '1', ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Mail server error ${r.status}`);
+  return j;
+}
+export const emailStatus = () => mailApi('status');
+export const emailSave = (c) => mailApi('config', { method: 'POST', body: c });
+export const emailDisconnect = () => mailApi('config', { method: 'DELETE' });
+
+/** Add one message to the daily note it arrived on, tagged #email. */
+export function ingestEmail(m) {
+  const seen = (S.cache.emailIds ||= []);
+  if (seen.includes(m.id)) return false;
+  const day = ensureDaily(dateKey(new Date(m.received || m.date)));
+  const from = m.from?.name || m.from?.address || 'unknown sender';
+  const clean = (t) => t.replace(/[\[\]]/g, '').replace(/\*\*/g, '');
+  const subj = clean(m.subject);
+  const asTask = /^(todo|task)\s*[:\-]\s*/i.test(subj);
+  const title = subj.replace(/^(todo|task)\s*[:\-]\s*/i, '');
+  const kids = [];
+  const paras = (m.text || '').split(/\n{2,}/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+  paras.slice(0, 14).forEach((p) => kids.push(newBlock(p.length > 700 ? p.slice(0, 700) + '…' : p)));
+  if (paras.length > 14) kids.push(newBlock('…message continues in your mailbox'));
+  if (m.links?.length) kids.push(newBlock(`**Links** ${m.links.slice(0, 5).join('  ')}`));
+  if (m.attachments?.length) kids.push(newBlock(`**Attachments** ${m.attachments.join(', ')} (not imported)`));
+  const head = newBlock(`#${EMAIL_TAG} **${title}** from ${clean(from)}`, {
+    children: kids, collapsed: (m.text || '').length > 500, email: { id: m.id, from: m.from?.address || '', subject: m.subject, sent: m.date },
+    ...(asTask ? { task: { status: 'todo', due: day.date } } : {}),
+  });
+  const last = day.blocks[day.blocks.length - 1];
+  if (last && !last.text && !last.children.length && !last.task) day.blocks.splice(day.blocks.length - 1, 0, head); else day.blocks.push(head);
+  ensureObject(EMAIL_TAG, 'tag');
+  seen.push(m.id); if (seen.length > 3000) seen.splice(0, seen.length - 3000);
+  touch(day, true);
+  return true;
+}
+
+/** Fetch queued mail from the server, file it, then acknowledge so it is not delivered twice. */
+export async function pullEmail({ poll = false } = {}) {
+  const r = poll ? await mailApi('poll', { method: 'POST' }) : await mailApi('inbox');
+  const msgs = r.messages || []; let n = 0;
+  for (const m of msgs) if (ingestEmail(m)) n++;
+  if (msgs.length) await mailApi('ack', { method: 'POST', body: { ids: msgs.map((m) => m.id) } });
+  return { n, status: r.status };
+}
