@@ -19,6 +19,7 @@ export const BUILTIN_TYPES = {
     id: 'project', name: 'Project', plural: 'Projects', icon: 'folder', color: '#0ea5e9', builtin: true,
     props: [{ key: 'status', label: 'Status', kind: 'select', options: ['Planned', 'Active', 'Paused', 'Done'] }, { key: 'due', label: 'Due', kind: 'date' }],
   },
+  pdf: { id: 'pdf', name: 'PDF', plural: 'PDFs', icon: 'pdf', color: '#ef4444', builtin: true, props: [{ key: 'author', label: 'Author', kind: 'text' }] },
   idea: { id: 'idea', name: 'Idea', plural: 'Ideas', icon: 'bulb', color: '#eab308', builtin: true, props: [] },
   tag: { id: 'tag', name: 'Tag', plural: 'Tags', icon: 'hash', color: '#94a3b8', builtin: true, props: [] },
 };
@@ -30,8 +31,8 @@ export const runtime = { proxy: false, saving: false };
 const DB = 'folio-outliner';
 function idb() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open(DB, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    const r = indexedDB.open(DB, 2);
+    r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv'); if (!d.objectStoreNames.contains('files')) d.createObjectStore('files'); };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
@@ -47,6 +48,20 @@ async function idbSet(k, v) {
     const db = await idb();
     await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   } catch { try { localStorage.setItem(DB + k, JSON.stringify(v)); } catch { /* quota */ } }
+}
+
+// Binary files (PDFs, snapshots) live outside the main state so saves stay small.
+export async function putFile(id, blob) {
+  const db = await idb();
+  await new Promise((res, rej) => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(blob, id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+}
+export async function getFile(id) {
+  const db = await idb();
+  return new Promise((res, rej) => { const q = db.transaction('files').objectStore('files').get(id); q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error); });
+}
+export async function deleteFile(id) {
+  const db = await idb();
+  await new Promise((res) => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').delete(id); tx.oncomplete = res; tx.onerror = res; });
 }
 
 const isEmptyDaily = (o) => o.type === 'daily' && !hasContent(o.blocks);
@@ -133,6 +148,9 @@ export function ensureObject(title, type = 'page') {
   return findByTitle(title) || createObject({ type, title: title.trim() });
 }
 export function deleteObject(id) {
+  const o = S.objects[id];
+  if (o?.pdf?.fileId) deleteFile(o.pdf.fileId);
+  if (o) walk(o.blocks, (b) => { if (b.img) deleteFile(b.img); });
   delete S.objects[id];
   S.favorites = S.favorites.filter((f) => f !== id);
   touch(null, true);

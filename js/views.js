@@ -7,6 +7,10 @@ import { showMenu, toast, confirmBox, promptBox, modal, closeMenu } from './ui.j
 import * as I from './integrations.js';
 import * as hooks from './hooks.js';
 import { objectToMarkdown, downloadZip, downloadSingle } from './export.js';
+import { Reader, pickPDF } from './reader.js';
+
+let reader = null;
+export const stopReader = () => { reader?.destroy(); reader = null; };
 
 export const go = (hash) => { location.hash = hash; };
 const main = () => document.getElementById('main-body');
@@ -43,8 +47,19 @@ export function renderObject(id, focusBlock) {
     obj.props?.cover ? h('img', { class: 'cover', src: obj.props.cover, alt: '', loading: 'lazy', onerror: (e) => e.target.remove() }) : null,
     h('div', { class: 'obj-head-text' }, kind, title));
   page.append(head, propsEl(obj));
-  const host = h('div', { class: 'outline-host' }); page.append(host);
-  mountOutline(host, obj);
+  const host = h('div', { class: 'outline-host' });
+  let readerHost = null;
+  if (obj.type === 'pdf' && obj.pdf) { readerHost = h('div', { class: 'reader-host' }); page.classList.add('reading'); page.append(readerHost, h('div', { class: 'section-label' }, 'Notes and highlights')); }
+  page.append(host);
+  const outline = mountOutline(host, obj);
+  if (readerHost) {
+    reader = new Reader(obj, readerHost, { flash: flashBlock, onAnnotate: (b, editId, plain) => {
+      const only = obj.blocks.length === 1 && !obj.blocks[0].text && !obj.blocks[0].children.length;
+      if (only) obj.blocks.splice(0, 1, b); else obj.blocks.push(b);
+      touch(obj, true); outline.render(editId ? { id: editId, pos: 0 } : undefined);
+      if (!editId) flashBlock(b.id);
+    } });
+  }
   page.append(refsSection(obj));
   root.append(page); fit();
   if (obj.title === 'Untitled' || obj._fresh) { title.focus(); title.select(); delete obj._fresh; }
@@ -376,11 +391,12 @@ export function renderType(tid) {
   const tagSel = allTags.length ? h('select', { class: 'input', onchange: (e) => { tag = e.target.value.toLowerCase(); paint(); } }, h('option', { value: '' }, 'All tags'), allTags.map((x) => h('option', { value: x }, '#' + x))) : null;
   const seg = h('div', { class: 'seg icons' }, modes.map(([k, l, ic]) => h('button', { class: k === mode ? 'on' : '', title: l, html: icon(ic, 15), onclick: (e) => { mode = k; S.settings.views[tid] = k; touch(); seg.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); paint(); } })));
   page.append(h('div', { class: 'view-head' }, h('h1', { class: 'with-ic', style: { '--c': t.color } }, typeBadge(t), t.plural),
-    tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>New ${esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) })),
+    tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>${tid === 'pdf' ? 'Import PDF' : 'New ' + esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) })),
     h('div', { class: 'type-tools' }, search, tagSel, h('span', { class: 'top-spacer' }), seg), body);
   paint(); root.append(page);
 }
 export function newObject(tid = 'page') {
+  if (tid === 'pdf') return pickPDF().then((o) => o && go('#/o/' + o.id));
   const o = createObject({ type: tid, title: 'Untitled', blocks: tid === 'meeting' ? import_meetingBlocks() : undefined, props: tid === 'meeting' ? { date: todayKey() } : {} });
   o._fresh = true; go('#/o/' + o.id);
 }
@@ -517,8 +533,8 @@ export function renderSettings() {
   const imp = h('input', { type: 'file', accept: '.json', style: { display: 'none' }, onchange: async (e) => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (!d.objects) throw new Error('Not a Folio export'); if (!(await confirmBox('Replace all current data with this file?', 'Replace'))) return; Object.assign(S, d); touch(null, true); location.hash = '#/daily'; location.reload(); } catch (err) { toast(err.message, { kind: 'warn' }); } } });
   page.append(sec('Your data', 'Everything lives in this browser (IndexedDB). The Markdown export holds all notes, tasks, calendar events and types as plain files with front matter. Tokens are never exported.',
     h('div', { class: 'set-actions' },
-      h('button', { class: 'btn primary', html: `${icon('download', 14)}<span>Download all as Markdown (.zip)</span>`, onclick: () => { const n = downloadZip(); toast(`Exported ${n} Markdown files`); } }),
-      h('button', { class: 'btn', onclick: () => downloadSingle(), html: `${icon('download', 14)}<span>Single .md file</span>` }),
+      h('button', { class: 'btn primary', html: `${icon('download', 14)}<span>Download all as Markdown (.zip)</span>`, onclick: async () => { const n = await downloadZip(); toast(`Exported ${n} files`); } }),
+      h('button', { class: 'btn', onclick: () => { downloadSingle(); }, html: `${icon('download', 14)}<span>Single .md file</span>` }),
       h('button', { class: 'btn', html: `${icon('download', 14)}<span>Backup JSON</span>`, onclick: () => { saveNow(); download(`folio-${todayKey()}.json`, JSON.stringify({ ...S, settings: { ...S.settings, todoistToken: '', readwiseToken: '' } }, null, 1)); } }),
       h('button', { class: 'btn', onclick: () => imp.click() }, 'Import JSON…'), imp)));
   root.append(page);

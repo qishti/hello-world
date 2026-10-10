@@ -1,6 +1,6 @@
 import { h, esc, relDate, relDateTime, dateKey, todayKey, addDays, dailyTitle, uid } from './util.js';
 import { icon } from './icons.js';
-import { S, REPEATS, toggleTask as storeToggle, newBlock, locate, touch, walk, findByTitle, createObject, ensureObject, search, objectsOfType, meetingBlocks, typeOf, getObject } from './store.js';
+import { S, getFile, REPEATS, toggleTask as storeToggle, newBlock, locate, touch, walk, findByTitle, createObject, ensureObject, search, objectsOfType, meetingBlocks, typeOf, getObject } from './store.js';
 import { renderInline } from './inline.js';
 import { showMenu, closeMenu, menuOpen, caretXY, datePopover, toast } from './ui.js';
 import * as hooks from './hooks.js';
@@ -24,6 +24,7 @@ const SLASH = [
   { label: 'Send to Todoist', icon: 'external', act: 'todoist', k: 'todoist send sync task' },
 ];
 
+const HL = { yellow: '#facc15', green: '#4ade80', blue: '#60a5fa', pink: '#f472b6' };
 let active = null; // the Outline with a live textarea
 
 export function mountOutline(host, obj, opts = {}) {
@@ -79,15 +80,24 @@ class Outline {
       ? h('button', { class: `check ${b.task.status}`, tabindex: '-1', title: 'Toggle task', onclick: () => this.toggleTask(b), html: b.task.status === 'done' ? icon('check', 12) : '' })
       : h('span', { class: 'bullet' + (b.collapsed && b.children.length ? ' folded' : '') }, h('i'));
     const body = h('div', { class: 'blk-body' });
+    if (b.img) body.append(this.imgEl(b));
     body.append(this.view(b, lone));
+    if (b.pdf && b.pdf.color !== 'snap') el.style.setProperty('--hl', HL[b.pdf.color] || HL.yellow);
     const chips = this.chips(b); if (chips) body.append(chips);
     el.append(h('div', { class: 'blk-row' }, handle, toggle, marker, body));
     if (b.children.length && !b.collapsed) el.append(h('div', { class: 'blk-children' }, this.list(b.children)));
     return el;
   }
 
+  imgEl(b) {
+    const img = h('img', { class: 'blk-img', alt: 'PDF snapshot', draggable: 'false' });
+    getFile(b.img).then((f) => { if (f) img.src = URL.createObjectURL(f); }).catch(() => {});
+    img.addEventListener('click', () => { if (b.pdf) window.dispatchEvent(new CustomEvent('folio:pdfgoto', { detail: { obj: this.obj, page: b.pdf.page } })); });
+    return img;
+  }
+
   view(b, lone) {
-    const v = h('div', { class: `blk-view${!b.text ? ' is-empty' : ''}`, 'data-ph': lone ? 'Write something, or press / for commands' : '' });
+    const v = h('div', { class: `blk-view${!b.text ? ' is-empty' : ''}`, 'data-ph': lone ? 'Write something, or press / for commands' : b.img ? 'Add a caption…' : '' });
     if (b.type === 'code') v.append(h('pre', null, b.text));
     else v.innerHTML = renderInline(b.text).replace(/\n/g, '<br>');
     v.addEventListener('mousedown', (e) => {
@@ -117,8 +127,10 @@ class Outline {
   }
 
   chips(b) {
-    if (!b.task) return null;
-    const t = b.task; const out = [];
+    const out = [];
+    if (b.pdf) out.push(h('button', { class: 'chip pdfpage', tabindex: '-1', title: 'Go to page', html: `${icon('pdf', 11)}<span>p. ${b.pdf.page}</span>`, onclick: () => window.dispatchEvent(new CustomEvent('folio:pdfgoto', { detail: { obj: this.obj, page: b.pdf.page } })) }));
+    if (!b.task) return out.length ? h('div', { class: 'chips' }, out) : null;
+    const t = b.task;
     const overdue = t.due && t.status !== 'done' && t.due < todayKey();
     const mk = (cls, ic, text, mode) => h('button', { class: `chip ${cls}`, tabindex: '-1', html: `${icon(ic, 12)}<span>${esc(text)}</span>`, onclick: (e) => this.pickDate(b, mode, e.currentTarget) });
     if (t.repeat) out.push(h('span', { class: 'chip repeat', title: REPEATS[t.repeat], html: `${icon('refresh', 11)}<span>${t.repeat === 'weekdays' ? 'Weekdays' : t.repeat[0].toUpperCase() + t.repeat.slice(1)}</span>` }));

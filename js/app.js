@@ -7,6 +7,7 @@ import * as I from './integrations.js';
 import { showMenu, closeMenu, toast, modal } from './ui.js';
 import { currentOutline } from './outline.js';
 import * as hooks from './hooks.js';
+import { importPDF } from './reader.js';
 
 const $ = (s) => document.querySelector(s);
 let sidebarEl; let panelEl; let calCursor = null; let panelObj = null;
@@ -30,7 +31,7 @@ function route() {
   closeMenu();
   const { parts, q } = parseHash();
   const [view, arg] = parts;
-  const scroller = $('#main'); 
+  const scroller = $('#main'); V.stopReader();
   switch (view) {
     case 'daily': V.renderDaily(arg); document.title = 'Daily · Folio'; break;
     case 'o': V.renderObject(arg, q.get('b')); document.title = (getObject(arg)?.title || 'Folio') + ' · Folio'; break;
@@ -136,7 +137,7 @@ function openPalette() {
   const cmds = [
     { label: 'Go to today', icon: 'calendar', run: () => V.go('#/daily') }, { label: 'Open tasks', icon: 'check', run: () => V.go('#/tasks') }, { label: 'Open calendar', icon: 'calendar', run: () => V.go('#/calendar') },
     { label: 'Open graph', icon: 'graph', run: () => V.go('#/graph') }, { label: 'Open settings', icon: 'sliders', run: () => V.go('#/settings') },
-    { label: 'New meeting note', icon: 'users', run: () => V.newObject('meeting') }, { label: 'Sync everything', icon: 'refresh', run: () => syncAll(true) },
+    { label: 'New meeting note', icon: 'users', run: () => V.newObject('meeting') }, { label: 'Import PDF…', icon: 'pdf', run: () => V.newObject('pdf') }, { label: 'Sync everything', icon: 'refresh', run: () => syncAll(true) },
     { label: 'Toggle dark mode', icon: 'moon', run: () => { S.settings.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(); touch(); paintSidebar(); } },
   ];
   const paint = () => {
@@ -195,6 +196,8 @@ function bindGlobal() {
     else if (mod && e.key === '\\') { e.preventDefault(); toggleSidebar(); }
   });
   window.addEventListener('hashchange', route);
+  window.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+  window.addEventListener('drop', async (e) => { const f = [...(e.dataTransfer?.files || [])].find((x) => /pdf$/i.test(x.type || x.name)); if (!f) return; e.preventDefault(); const o = await importPDF(f); if (o) V.go('#/o/' + o.id); });
   const refresh = debounce(() => { const f = document.activeElement; if (f && f.matches?.('.blk-edit, .title-input, .prop-input, input, select')) { paintSidebar(); return; } route(); }, 30);
   window.addEventListener('folio:refresh', () => route());
   subscribe(() => { paintSidebar(); paintPanel(); });

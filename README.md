@@ -34,6 +34,15 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Version history per object, with preview and restore.
 - Presentation mode: top-level bullets become slides.
 
+**PDF reader**
+- Import a PDF from the sidebar `+`, the command palette, the PDFs page, or by dropping a file anywhere.
+- Page-by-page reader with zoom, arrow-key paging and your place remembered.
+- Select text and pick a color to highlight. Each highlight becomes a quote bullet with its page number; add a note as a child bullet. Deleting the bullet removes the highlight.
+- Snapshot tool: drag over any area to save it as an image bullet.
+- Analyze: page and word counts, top keywords and an extractive summary, computed on your device (no AI service).
+- Markdown export includes the original PDF and snapshot images under `Files/`.
+- Built on [PDF.js](https://mozilla.github.io/pdf.js/) (Apache-2.0), vendored in `vendor/`.
+
 **Daily notes and calendar**
 - Daily note per date with an agenda card, tasks due today, and a highlight from your reading.
 - Month calendar and a mini calendar in the sidebar.
@@ -75,6 +84,8 @@ js/store.js         data model, search, backlinks, persistence
 js/outline.js       block editor
 js/views.js         daily, object, tasks, calendar, graph, settings
 js/integrations.js  Todoist, Readwise, calendar, reminders
+js/reader.js        PDF reader
+vendor/             PDF.js
 js/export.js        Markdown/zip export
 js/ics.js           iCalendar parser with recurrence expansion
 js/app.js           shell, router, sidebar, command palette
