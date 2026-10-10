@@ -37,7 +37,7 @@ function route() {
     case 'o': V.renderObject(arg, q.get('b')); document.title = (getObject(arg)?.title || 'Folio') + ' · Folio'; break;
     case 'tasks': V.renderTasks(); document.title = 'Tasks · Folio'; break;
     case 'calendar': V.renderCalendar(arg); document.title = 'Calendar · Folio'; break;
-    case 'graph': V.renderGraph(); document.title = 'Graph · Folio'; break;
+    case 'graph': V.renderGraph(arg); document.title = 'Graph · Folio'; break;
     case 'type': V.renderType(arg); document.title = (S.types[arg]?.plural || 'Folio') + ' · Folio'; break;
     case 'highlights': V.renderHighlights(); document.title = 'Highlights · Folio'; break;
     case 'settings': V.renderSettings(); document.title = 'Settings · Folio'; break;
@@ -121,7 +121,7 @@ export function paintSidebar() {
       h('nav', { class: 'navs' }, navItem('calendar', 'Today', '#/daily'), navItem('check', 'Tasks', '#/tasks', dueToday ? h('b', { class: 'badge' }, dueToday) : null), navItem('calendar', 'Calendar', '#/calendar'), navItem('highlighter', 'Highlights', '#/highlights', hlCount ? h('em', { class: 'count' }, hlCount) : null), navItem('graph', 'Graph', '#/graph')),
       miniCal(),
       S.favorites.length ? h('div', { class: 'sb-sec' }, h('div', { class: 'sb-label' }, 'Favorites'), S.favorites.map(getObject).filter(Boolean).map((o) => h('a', { class: `nav small${location.hash.includes(o.id) ? ' on' : ''}`, href: '#/o/' + o.id }, h('span', { class: 'type-ic sm', style: { '--c': typeOf(o).color }, html: icon(typeOf(o).icon, 12) }), h('span', { class: 'nav-label' }, o.title)))) : null,
-      h('div', { class: 'sb-sec' }, h('div', { class: 'sb-label' }, 'Types'),
+      h('div', { class: 'sb-sec' }, h('div', { class: 'sb-label sb-label-row' }, h('span', null, 'Types'), h('button', { class: 'icon-btn small', title: 'New type', html: icon('plus', 13), onclick: () => V.typeEditor(null) })),
         Object.values(S.types).filter((t) => t.id !== 'daily').map((t) => { const n = objectsOfType(t.id).length; return h('a', { class: `nav small${location.hash === '#/type/' + t.id ? ' on' : ''}`, href: '#/type/' + t.id }, h('span', { class: 'type-ic sm', style: { '--c': t.color }, html: icon(t.icon, 12) }), h('span', { class: 'nav-label' }, t.plural), n ? h('em', { class: 'count' }, n) : null); }))),
     h('div', { class: 'sb-foot' },
       h('a', { class: `nav small${location.hash === '#/settings' ? ' on' : ''}`, href: '#/settings' }, h('span', { html: icon('sliders', 16) }), h('span', { class: 'nav-label' }, 'Settings')),

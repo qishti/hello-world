@@ -5,11 +5,15 @@ export const BUILTIN_TYPES = {
   page: { id: 'page', name: 'Page', plural: 'Pages', icon: 'file', color: '#64748b', builtin: true, props: [] },
   person: {
     id: 'person', name: 'Person', plural: 'People', icon: 'user', color: '#f59e0b', builtin: true,
-    props: [{ key: 'email', label: 'Email', kind: 'text' }, { key: 'phone', label: 'Phone', kind: 'text' }, { key: 'company', label: 'Company', kind: 'text' }, { key: 'role', label: 'Role', kind: 'text' }],
+    props: [{ key: 'organization', label: 'Organization', kind: 'entity', types: ['organization'], multi: false }, { key: 'email', label: 'Email', kind: 'text' }, { key: 'phone', label: 'Phone', kind: 'text' }, { key: 'role', label: 'Role', kind: 'text' }, { key: 'company', label: 'Company', kind: 'text' }],
+  },
+  organization: {
+    id: 'organization', name: 'Organization', plural: 'Organizations', icon: 'building', color: '#14b8a6', builtin: true,
+    props: [{ key: 'category', label: 'Category', kind: 'select', options: ['Company', 'Nonprofit', 'Government', 'University', 'Startup', 'NGO'] }, { key: 'website', label: 'Website', kind: 'url' }],
   },
   meeting: {
     id: 'meeting', name: 'Meeting', plural: 'Meetings', icon: 'users', color: '#ec4899', builtin: true,
-    props: [{ key: 'date', label: 'Date', kind: 'date' }, { key: 'time', label: 'Time', kind: 'text' }, { key: 'location', label: 'Location', kind: 'text' }, { key: 'link', label: 'Link', kind: 'url' }],
+    props: [{ key: 'date', label: 'Date', kind: 'date' }, { key: 'attendees', label: 'Attendees', kind: 'entity', types: ['person'], multi: true }, { key: 'project', label: 'Project', kind: 'entity', types: ['project'], multi: false }, { key: 'time', label: 'Time', kind: 'text' }, { key: 'location', label: 'Location', kind: 'text' }, { key: 'link', label: 'Link', kind: 'url' }],
   },
   source: {
     id: 'source', name: 'Source', plural: 'Sources', icon: 'book', color: '#10b981', builtin: true,
@@ -17,12 +21,18 @@ export const BUILTIN_TYPES = {
   },
   project: {
     id: 'project', name: 'Project', plural: 'Projects', icon: 'folder', color: '#0ea5e9', builtin: true,
-    props: [{ key: 'status', label: 'Status', kind: 'select', options: ['Planned', 'Active', 'Paused', 'Done'] }, { key: 'due', label: 'Due', kind: 'date' }],
+    props: [{ key: 'status', label: 'Status', kind: 'select', options: ['Planned', 'Active', 'Paused', 'Done'] }, { key: 'due', label: 'Due', kind: 'date' }, { key: 'collaborators', label: 'Collaborators', kind: 'entity', types: ['person'], multi: true }],
   },
   pdf: { id: 'pdf', name: 'PDF', plural: 'PDFs', icon: 'pdf', color: '#ef4444', builtin: true, props: [{ key: 'author', label: 'Author', kind: 'text' }] },
   idea: { id: 'idea', name: 'Idea', plural: 'Ideas', icon: 'bulb', color: '#eab308', builtin: true, props: [] },
   tag: { id: 'tag', name: 'Tag', plural: 'Tags', icon: 'hash', color: '#94a3b8', builtin: true, props: [] },
 };
+
+export const PROP_KINDS = [
+  ['text', 'Text'], ['richtext', 'Long text'], ['number', 'Number'], ['date', 'Date'], ['select', 'Label'], ['boolean', 'Checkbox'], ['url', 'Link'], ['entity', 'Object'],
+];
+/** Every non-daily, non-tag object can carry tags as references to Tag objects, like Capacities. */
+export const TAGS_PROP = { key: 'tags', label: 'Tags', kind: 'entity', types: ['tag'], multi: true, virtual: true };
 
 export let S = null;
 export const runtime = { proxy: false, saving: false };
@@ -179,6 +189,24 @@ export function linksIn(text) {
   while ((m = LINK_RE.exec(text))) out.push((m[1] || m[2]).trim().toLowerCase());
   return out;
 }
+// ---------- properties and object references ----------
+export function typeProps(obj) {
+  const t = S.types[obj.type] || S.types.page;
+  if (obj.type === 'daily' || obj.type === 'tag') return [...(t.props || [])];
+  return [...(t.props || []), TAGS_PROP];
+}
+/** Objects referenced by an object-type property (ids are stored; deleted targets are dropped). */
+export function refObjects(obj, key) {
+  const v = obj.props?.[key]; const ids = Array.isArray(v) ? v : v ? [v] : [];
+  return ids.map((id) => S.objects[id]).filter(Boolean);
+}
+export function setRefs(obj, key, objs) { obj.props[key] = objs.map((o) => o.id); touch(obj, true); }
+export function propRefs(obj) {
+  const out = [];
+  for (const d of typeProps(obj)) if (d.kind === 'entity') for (const t of refObjects(obj, d.key)) out.push({ prop: d, target: t });
+  return out;
+}
+
 export function backlinks(obj) {
   const keys = [obj.title, ...(obj.aliases || [])].map((x) => x.trim().toLowerCase()).filter(Boolean);
   const groups = [];
@@ -186,7 +214,8 @@ export function backlinks(obj) {
     if (o.id === obj.id) continue;
     const hits = [];
     walk(o.blocks, (b) => { if (b.text && linksIn(b.text).some((l) => keys.includes(l))) hits.push(b); });
-    if (hits.length) groups.push({ obj: o, blocks: hits });
+    const via = propRefs(o).filter((r) => r.target.id === obj.id).map((r) => r.prop.label);
+    if (hits.length || via.length) groups.push({ obj: o, blocks: hits, via: [...new Set(via)] });
   }
   return groups.sort((a, b) => b.obj.updated - a.obj.updated);
 }
@@ -212,6 +241,7 @@ export function linkMention(block, title) {
 export function outgoing(obj) {
   const set = new Set();
   walk(obj.blocks, (b) => linksIn(b.text).forEach((l) => set.add(l)));
+  propRefs(obj).forEach((r) => set.add(r.target.title.trim().toLowerCase()));
   return set;
 }
 
@@ -280,6 +310,15 @@ export async function load() {
   S.settings = { ...fresh().settings, ...S.settings };
   S.cache = { ...fresh().cache, ...S.cache };
   S.favorites ||= [];
+  if (!S.typesVersion || S.typesVersion < 2) {
+    // v2 adds object-reference properties to the built-in types without touching your edits.
+    for (const [id, b] of Object.entries(BUILTIN_TYPES)) {
+      const t = S.types[id]; if (!t) continue;
+      t.props ||= [];
+      for (const p of b.props) if (!t.props.some((x) => x.key === p.key)) t.props.push(structuredClone(p));
+    }
+    S.typesVersion = 2;
+  }
   if (first) seed();
   index = null;
   return S;

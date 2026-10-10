@@ -1,5 +1,5 @@
 // Plain-Markdown export of everything in Folio: one .md per object, plus index files, in a .zip.
-import { S, allObjects, walk, collectTasks, typeOf, linksIn, getFile, locate } from './store.js';
+import { S, allObjects, walk, collectTasks, typeOf, linksIn, getFile, locate, typeProps, refObjects } from './store.js';
 import { eventsBetween, eventTime, todoistOpen } from './integrations.js';
 import { dateKey, todayKey, download, relDate } from './util.js';
 
@@ -35,7 +35,15 @@ export function objectToMarkdown(obj) {
   if (obj.date) fm.push(`date: ${obj.date}`);
   if (obj.aliases?.length) fm.push(`aliases: [${obj.aliases.map(yamlStr).join(', ')}]`);
   if (obj.pdf) { fm.push(`file: Files/${safe(obj.pdf.name || obj.title)}`, `pages: ${obj.pdf.pages}`); if (obj.pdf.analysis) fm.push(`keywords: [${obj.pdf.analysis.keywords.map(yamlStr).join(', ')}]`, `summary: ${JSON.stringify(obj.pdf.analysis.summary)}`); }
-  for (const [k, v] of Object.entries(obj.props || {})) if (v && !INTERNAL.has(k)) fm.push(`${k}: ${yamlStr(String(v))}`);
+  const defs = typeProps(obj); const done = new Set();
+  for (const d of defs) {
+    done.add(d.key); const v = obj.props?.[d.key];
+    if (d.kind === 'entity') { const t = refObjects(obj, d.key); if (t.length) fm.push(`${d.key}: [${t.map((x) => JSON.stringify(`[[${x.title}]]`)).join(', ')}]`); }
+    else if (d.kind === 'boolean') { if (v !== undefined) fm.push(`${d.key}: ${v === true}`); }
+    else if (d.kind === 'number') { if (v !== undefined && v !== '') fm.push(`${d.key}: ${v}`); }
+    else if (v) fm.push(`${d.key}: ${yamlStr(String(v).replace(/\n/g, ' '))}`);
+  }
+  for (const [k, v] of Object.entries(obj.props || {})) if (v && !INTERNAL.has(k) && !done.has(k) && !Array.isArray(v)) fm.push(`${k}: ${yamlStr(String(v))}`);
   const tags = new Set(); walk(obj.blocks, (b) => { for (const m of b.text.matchAll(/(?:^|[\s(])#([A-Za-z0-9][\w-]*)/g)) tags.add(m[1]); });
   if (tags.size) fm.push(`tags: [${[...tags].join(', ')}]`);
   fm.push(`created: ${new Date(obj.created).toISOString()}`, `updated: ${new Date(obj.updated).toISOString()}`, '---', '');
@@ -66,7 +74,7 @@ function calendarMarkdown() {
 }
 function typesMarkdown() {
   const L = ['# Object types', ''];
-  Object.values(S.types).forEach((t) => L.push(`## ${t.name}`, `- plural: ${t.plural}`, `- icon: ${t.icon}`, `- color: ${t.color}`, ...(t.props?.length ? [`- properties: ${t.props.map((p) => p.label).join(', ')}`] : []), ''));
+  Object.values(S.types).forEach((t) => L.push(`## ${t.name}`, `- plural: ${t.plural}`, `- icon: ${t.icon}`, `- color: ${t.color}`, ...(t.props?.length ? ['- properties:', ...t.props.map((p) => `  - ${p.label} (${p.kind}${p.kind === 'entity' ? ': ' + ((p.types || []).map((x) => S.types[x]?.name || x).join(', ') || 'any type') + (p.multi ? ', several' : '') : p.kind === 'select' ? ': ' + (p.options || []).join(' / ') : ''})`)] : []), ''));
   return L.join('\n');
 }
 

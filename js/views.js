@@ -1,6 +1,6 @@
 import { h, esc, todayKey, addDays, parseKey, dateKey, dailyTitle, relDate, relDateTime, timeAgo, WEEKDAYS, MONTHS_LONG, download, copyText, fmtTime, pad } from './util.js';
 import { icon, ICON_NAMES } from './icons.js';
-import { S, runtime, getObject, typeOf, ensureDaily, createObject, deleteObject, renameObject, touch, backlinks, unlinkedMentions, linkMention, objectsOfType, allObjects, collectTasks, toggleFavorite, outgoing, walk, newBlock, toggleTask, saveNow, findByTitle, snapshot, restoreSnapshot, linksIn } from './store.js';
+import { S, runtime, getObject, typeOf, ensureDaily, createObject, deleteObject, renameObject, touch, backlinks, unlinkedMentions, linkMention, objectsOfType, allObjects, collectTasks, toggleFavorite, outgoing, walk, newBlock, toggleTask, saveNow, findByTitle, snapshot, restoreSnapshot, linksIn, typeProps, refObjects, setRefs, propRefs, PROP_KINDS } from './store.js';
 import { mountOutline } from './outline.js';
 import { renderInline, chip } from './inline.js';
 import { showMenu, toast, confirmBox, promptBox, modal, closeMenu } from './ui.js';
@@ -40,8 +40,8 @@ export function renderObject(id, focusBlock) {
   title.addEventListener('blur', () => { if (title.value.trim() !== obj.title) { renameObject(obj, title.value); document.title = obj.title + ' · Folio'; } });
 
   const kind = h('button', { class: 'kind-pill', style: { '--c': t.color }, html: `${icon(t.icon, 13)}<span>${esc(t.name)}</span>${icon('chevD', 12)}`, onclick: (e) => {
-    showMenu({ anchor: e.currentTarget, keepFocus: false, items: Object.values(S.types).filter((x) => x.id !== 'daily').map((x) => ({ label: x.name, icon: x.icon, color: x.color, value: x.id, check: x.id === obj.type })),
-      onPick: (it) => { obj.type = it.value; touch(obj, true); rerender(); } });
+    showMenu({ anchor: e.currentTarget, keepFocus: false, items: [...Object.values(S.types).filter((x) => x.id !== 'daily').map((x) => ({ label: x.name, icon: x.icon, color: x.color, value: x.id, check: x.id === obj.type })), { sep: true }, { label: 'Edit this type…', icon: 'edit', value: '__edit' }, { label: 'New type…', icon: 'plus', value: '__new' }],
+      onPick: (it) => { if (it.value === '__edit') return typeEditor(obj.type); if (it.value === '__new') return typeEditor(null); obj.type = it.value; touch(obj, true); rerender(); } });
   } });
 
   const head = h('div', { class: 'obj-head' },
@@ -87,27 +87,158 @@ function objActions(obj) {
   ];
 }
 
+const hashColor = (str) => { let n = 0; for (const c of str) n = (n * 31 + c.charCodeAt(0)) >>> 0; return ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444', '#14b8a6'][n % 8]; };
+const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** Pick an existing object (restricted to allowed types) or create one on the spot. */
+function pickObject(anchor, d, exclude, onPick) {
+  const allowed = d.types?.length ? d.types.filter((t) => S.types[t]) : Object.keys(S.types).filter((t) => t !== 'daily');
+  const input = h('input', { class: 'menu-input', placeholder: `Find ${allowed.length === 1 ? S.types[allowed[0]].plural.toLowerCase() : 'objects'}…` });
+  const items = () => {
+    const q = input.value.trim();
+    const res = allObjects().filter((o) => allowed.includes(o.type) && !exclude.has(o.id) && (!q || o.title.toLowerCase().includes(q.toLowerCase())))
+      .sort((a, b) => (a.title.toLowerCase().startsWith(q.toLowerCase()) ? 0 : 1) - (b.title.toLowerCase().startsWith(q.toLowerCase()) ? 0 : 1) || b.updated - a.updated).slice(0, 8);
+    const out = res.map((o) => ({ label: o.title, sub: typeOf(o).name, icon: typeOf(o).icon, color: typeOf(o).color, obj: o }));
+    if (q && !res.some((o) => o.title.toLowerCase() === q.toLowerCase())) {
+      if (out.length) out.push({ sep: true });
+      allowed.forEach((tid) => out.push({ label: `New ${S.types[tid].name.toLowerCase()} “${q}”`, icon: 'plus', color: S.types[tid].color, create: tid, title: q }));
+    }
+    return out;
+  };
+  const ctl = showMenu({ anchor, keepFocus: false, header: input, items: items(), width: 300, onPick: (it) => {
+    let o = it.obj;
+    if (it.create) o = createObject({ type: it.create, title: it.title, blocks: it.create === 'meeting' ? import_meetingBlocks() : undefined });
+    onPick(o);
+  } });
+  input.addEventListener('input', () => ctl.update(items()));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); ctl.move(1); } else if (e.key === 'ArrowUp') { e.preventDefault(); ctl.move(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); ctl.pick(); } else if (e.key === 'Escape') closeMenu();
+  });
+  setTimeout(() => input.focus(), 10);
+}
+
+function entityEditor(obj, d) {
+  const box = h('div', { class: 'ent' });
+  const paint = () => {
+    box.textContent = '';
+    const cur = refObjects(obj, d.key);
+    cur.forEach((t) => { const st = typeOf(t); box.append(h('span', { class: 'ent-chip', style: { '--c': st.color } },
+      h('a', { html: `${icon(st.icon, 12)}<span>${esc(t.title)}</span>`, onclick: () => go(t.type === 'daily' ? '#/daily/' + t.date : '#/o/' + t.id) }),
+      h('button', { title: 'Remove', html: icon('x', 11), onclick: () => { setRefs(obj, d.key, cur.filter((x) => x !== t)); paint(); } }))); });
+    if (d.multi || !cur.length) box.append(h('button', { class: 'ent-add', html: `${icon('plus', 12)}<span>${cur.length ? '' : 'Add'}</span>`, onclick: (e) => pickObject(e.currentTarget, d, new Set(cur.map((x) => x.id)), (o) => { setRefs(obj, d.key, d.multi ? [...cur, o] : [o]); paint(); }) }));
+  };
+  paint(); return box;
+}
+
+function dateEditor(obj, d, set, repaint) {
+  const raw = obj.props[d.key] || ''; const [s0, e0] = String(raw).split('->').map((x) => x.trim());
+  const start = h('input', { type: 'date', class: 'prop-input', value: s0 || '' });
+  const end = h('input', { type: 'date', class: 'prop-input', value: e0 || '' });
+  const commit = () => { set(start.value ? (end.value ? `${start.value} -> ${end.value}` : start.value) : ''); };
+  start.addEventListener('change', () => { commit(); repaint(); }); end.addEventListener('change', () => { commit(); repaint(); });
+  const wrap = h('div', { class: 'prop-date' }, start);
+  if (e0 || wrap.dataset.range) wrap.append(h('span', { class: 'muted' }, '→'), end);
+  else if (s0) wrap.append(h('button', { class: 'add-prop', onclick: (e) => { e.currentTarget.replaceWith(h('span', { class: 'muted' }, '→'), end); end.focus(); }, html: `${icon('plus', 12)}<span>End</span>` }));
+  if (s0) wrap.append(h('a', { class: 'prop-open', title: 'Open daily note', onclick: () => go('#/daily/' + s0), html: icon('arrowR', 13) }));
+  return wrap;
+}
+
 function propsEl(obj) {
-  const defs = [{ key: 'aliases', label: 'Aliases', kind: 'aliases' }, ...(typeOf(obj).props || [])];
   const wrap = h('div', { class: 'props' });
-  const shown = new Set(defs.filter((d) => (d.kind === 'aliases' ? obj.aliases?.length : obj.props[d.key])).map((d) => d.key));
+  const defs = () => [{ key: 'aliases', label: 'Aliases', kind: 'aliases' }, ...typeProps(obj)];
+  const isSet = (d) => (d.kind === 'aliases' ? obj.aliases?.length : d.kind === 'entity' ? refObjects(obj, d.key).length : d.kind === 'boolean' ? obj.props[d.key] !== undefined : d.kind === 'number' ? obj.props[d.key] !== undefined && obj.props[d.key] !== '' : obj.props[d.key]);
+  const shown = new Set(defs().filter(isSet).map((d) => d.key));
   const paint = () => {
     wrap.textContent = '';
-    defs.filter((d) => shown.has(d.key)).forEach((d) => {
-      const val = d.kind === 'aliases' ? (obj.aliases || []).join(', ') : obj.props[d.key] || '';
+    const all = defs();
+    all.filter((d) => shown.has(d.key)).forEach((d) => {
+      const val = obj.props[d.key] ?? '';
       const set = (v) => { obj.props[d.key] = v; touch(obj); };
       let input;
-      if (d.kind === 'aliases') input = h('input', { class: 'prop-input', type: 'text', value: val, placeholder: 'Other names that link here, comma separated', onchange: (e) => { obj.aliases = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); touch(obj, true); } });
-      else if (d.kind === 'select') input = h('select', { class: 'prop-input', onchange: (e) => set(e.target.value) }, h('option', { value: '' }, '—'), d.options.map((o) => h('option', { value: o, selected: o === val }, o)));
-      else if (d.kind === 'date') input = h('div', { class: 'prop-date' }, h('input', { type: 'date', class: 'prop-input', value: val, onchange: (e) => { set(e.target.value); paint(); } }), val ? h('a', { class: 'prop-open', title: 'Open daily note', onclick: () => go('#/daily/' + val), html: icon('arrowR', 13) }) : null);
-      else input = h('div', { class: 'prop-date' }, h('input', { class: 'prop-input', type: 'text', value: val, placeholder: 'Empty', onchange: (e) => set(e.target.value.trim()) }), d.kind === 'url' && val ? h('a', { class: 'prop-open', href: val, target: '_blank', rel: 'noopener', html: icon('external', 13) }) : null);
-      wrap.append(h('div', { class: 'prop' }, h('span', { class: 'prop-label' }, d.label), input));
+      if (d.kind === 'aliases') input = h('input', { class: 'prop-input', type: 'text', value: (obj.aliases || []).join(', '), placeholder: 'Other names that link here, comma separated', onchange: (e) => { obj.aliases = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); touch(obj, true); } });
+      else if (d.kind === 'entity') input = entityEditor(obj, d);
+      else if (d.kind === 'select') {
+        const c = val ? hashColor(val) : null;
+        input = h('button', { class: `label-pill${val ? '' : ' empty'}`, style: c ? { '--c': c } : {}, html: `<span>${esc(val || 'Choose…')}</span>${icon('chevD', 11)}`, onclick: (e) => showMenu({ anchor: e.currentTarget, keepFocus: false, items: [...(d.options || []).map((o) => ({ label: o, value: o, check: o === val })), { sep: true }, { label: 'Clear', value: '' }], onPick: (it) => { set(it.value); paint(); } }) });
+      } else if (d.kind === 'boolean') input = h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: obj.props[d.key] === true, onchange: (e) => set(e.target.checked) }), h('i'));
+      else if (d.kind === 'date') input = dateEditor(obj, d, set, paint);
+      else if (d.kind === 'number') input = h('input', { class: 'prop-input', type: 'number', value: val, placeholder: 'Empty', onchange: (e) => set(e.target.value === '' ? '' : Number(e.target.value)) });
+      else if (d.kind === 'richtext') { input = h('textarea', { class: 'prop-input area', rows: '1', placeholder: 'Empty', value: val, oninput: (e) => { e.target.style.height = '0'; e.target.style.height = e.target.scrollHeight + 'px'; }, onchange: (e) => set(e.target.value) }); setTimeout(() => { input.style.height = '0'; input.style.height = input.scrollHeight + 'px'; }, 0); }
+      else input = h('div', { class: 'prop-date' }, h('input', { class: 'prop-input', type: 'text', value: val, placeholder: 'Empty', onchange: (e) => set(e.target.value.trim()) }), d.kind === 'url' && val ? h('a', { class: 'prop-open', href: /^https?:/.test(val) ? val : 'https://' + val, target: '_blank', rel: 'noopener', html: icon('external', 13) }) : null);
+      wrap.append(h('div', { class: 'prop', 'data-key': d.key }, h('span', { class: 'prop-label', title: d.label }, d.label), input));
     });
-    const rest = defs.filter((d) => !shown.has(d.key));
-    if (rest.length) wrap.append(h('button', { class: 'add-prop', html: `${icon('plus', 13)}<span>Property</span>`, onclick: (e) => showMenu({ anchor: e.currentTarget, keepFocus: false, items: rest.map((d) => ({ label: d.label, value: d.key })), onPick: (it) => { shown.add(it.value); paint(); wrap.querySelector('.prop:last-of-type .prop-input')?.focus(); } }) }));
-    wrap.classList.toggle('none', !wrap.children.length);
+    const rest = all.filter((d) => !shown.has(d.key));
+    wrap.append(h('button', { class: 'add-prop', html: `${icon('plus', 13)}<span>Property</span>`, onclick: (e) => showMenu({ anchor: e.currentTarget, keepFocus: false, items: [
+      ...rest.map((d) => ({ label: d.label, sub: d.kind === 'entity' ? (d.types || []).map((t) => S.types[t]?.name).filter(Boolean).join(', ') || 'Object' : (PROP_KINDS.find((k) => k[0] === d.kind) || [])[1], value: d.key })),
+      ...(rest.length ? [{ sep: true }] : []), { label: 'New property…', icon: 'plus', value: '__new' }, { label: `Edit ${typeOf(obj).name.toLowerCase()} type…`, icon: 'edit', value: '__edit' }],
+    onPick: (it) => { if (it.value === '__new') typeEditor(obj.type, { newProp: true }); else if (it.value === '__edit') typeEditor(obj.type); else { shown.add(it.value); paint(); const c = wrap.querySelector(`.prop[data-key="${it.value}"]`)?.querySelector('.label-pill, .ent-add, input:not([type=checkbox]), textarea'); if (c && c.tagName === 'INPUT') c.focus(); else setTimeout(() => c?.click?.(), 30); } } }) }));
   };
   paint(); return wrap;
+}
+
+// ======================================================================
+// Type editor: name, icon, color and properties (including object-type properties)
+// ======================================================================
+const TYPE_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#0ea5e9', '#6366f1', '#a855f7', '#ec4899', '#64748b'];
+export function typeEditor(typeId, { newProp = false } = {}) {
+  const orig = typeId ? S.types[typeId] : null;
+  const d = orig ? structuredClone(orig) : { id: '', name: '', plural: '', icon: 'file', color: TYPE_COLORS[(Object.keys(S.types).length * 3) % TYPE_COLORS.length], props: [], builtin: false };
+  d.props = (d.props || []).map((p) => ({ ...p }));
+  if (newProp) d.props.push({ label: '', kind: 'text', _new: true });
+  const name = h('input', { class: 'input', placeholder: 'Type name, e.g. Recipe', value: d.name });
+  const plural = h('input', { class: 'input', placeholder: 'Plural', value: d.plural });
+  let ico = d.icon; let col = d.color;
+  const icons = h('div', { class: 'icon-pick' }), colors = h('div', { class: 'color-pick' });
+  const paintPick = () => {
+    icons.textContent = ''; ICON_NAMES.forEach((n) => icons.append(h('button', { class: n === ico ? 'on' : '', html: icon(n, 15), onclick: () => { ico = n; paintPick(); } })));
+    colors.textContent = ''; TYPE_COLORS.forEach((c) => colors.append(h('button', { style: { background: c }, class: c === col ? 'on' : '', onclick: () => { col = c; paintPick(); } })));
+  };
+  const list = h('div', { class: 'pe-list' });
+  const paintProps = () => {
+    list.textContent = '';
+    if (!d.props.length) list.append(h('div', { class: 'muted small', style: { padding: '8px 2px' } }, 'No properties yet.'));
+    d.props.forEach((p, i) => {
+      const label = h('input', { class: 'input', placeholder: 'Property name', value: p.label, oninput: (e) => { p.label = e.target.value; } });
+      const kind = h('select', { class: 'input', onchange: (e) => { p.kind = e.target.value; if (p.kind === 'entity') { p.types ||= []; p.multi ??= false; } paintProps(); } }, PROP_KINDS.map(([k, l]) => h('option', { value: k, selected: k === p.kind }, l)));
+      const cfg = h('div', { class: 'pe-cfg' });
+      if (p.kind === 'select') cfg.append(h('input', { class: 'input', placeholder: 'Options, comma separated (Low, Medium, High)', value: (p.options || []).join(', '), oninput: (e) => { p.options = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); } }));
+      if (p.kind === 'entity') {
+        const tl = Object.values(S.types).filter((t) => t.id !== 'daily');
+        const chips = h('div', { class: 'pe-types' }, h('span', { class: 'muted small' }, 'Links to:'), tl.map((t) => h('button', { class: `pe-type${(p.types || []).includes(t.id) ? ' on' : ''}`, style: { '--c': t.color }, html: `${icon(t.icon, 12)}<span>${esc(t.name)}</span>`, onclick: (e) => { p.types ||= []; const k = p.types.indexOf(t.id); if (k >= 0) p.types.splice(k, 1); else p.types.push(t.id); e.currentTarget.classList.toggle('on'); } })), h('span', { class: 'muted small' }, 'none selected = any type'));
+        cfg.append(chips, h('label', { class: 'pe-check' }, h('input', { type: 'checkbox', checked: !!p.multi, onchange: (e) => { p.multi = e.target.checked; } }), h('span', null, 'Allow several')));
+      }
+      list.append(h('div', { class: 'pe-row' }, h('div', { class: 'pe-main' }, label, kind,
+        h('button', { class: 'icon-btn small', title: 'Move up', html: icon('up', 14), disabled: i === 0, onclick: () => { d.props.splice(i - 1, 0, d.props.splice(i, 1)[0]); paintProps(); } }),
+        h('button', { class: 'icon-btn small', title: 'Move down', html: `<span style="display:inline-block;transform:rotate(180deg)">${icon('up', 14)}</span>`, disabled: i === d.props.length - 1, onclick: () => { d.props.splice(i + 1, 0, d.props.splice(i, 1)[0]); paintProps(); } }),
+        h('button', { class: 'icon-btn small', title: 'Remove property', html: icon('trash', 14), onclick: () => { d.props.splice(i, 1); paintProps(); } })), cfg.children.length ? cfg : null));
+      if (p._new) setTimeout(() => { label.focus(); delete p._new; }, 30);
+    });
+  };
+  const save = () => {
+    const n = name.value.trim(); if (!n) { name.focus(); return toast('Give the type a name'); }
+    d.name = n; d.plural = plural.value.trim() || n + 's'; d.icon = ico; d.color = col;
+    if (!d.id) { let id = slug(n) || 'type'; while (S.types[id]) id += '-2'; d.id = id; }
+    const used = new Set(['tags', 'aliases', 'title']);
+    d.props = d.props.filter((p) => p.label.trim()).map((p) => {
+      let key = p.key; if (!key) { key = slug(p.label).replace(/-/g, '_') || 'prop'; let k = key; let i = 2; while (used.has(k) || d.props.some((x) => x !== p && x.key === k)) k = key + '_' + i++; key = k; }
+      used.add(key); const out = { key, label: p.label.trim(), kind: p.kind };
+      if (p.kind === 'select') out.options = p.options || []; if (p.kind === 'entity') { out.types = p.types || []; out.multi = !!p.multi; }
+      return out;
+    });
+    delete d._new; S.types[d.id] = d; touch(null, true); m.close(); rerender();
+    if (!orig) go('#/type/' + d.id);
+  };
+  const del = orig && !orig.builtin ? h('button', { class: 'btn ghost danger-text', onclick: async () => { if (objectsOfType(orig.id).length) return toast('Move or delete its objects first'); if (await confirmBox(`Delete the “${orig.name}” type?`)) { delete S.types[orig.id]; touch(null, true); m.close(); go('#/daily'); } } }, 'Delete type') : null;
+  const body = h('div', { class: 'pe' },
+    h('div', { class: 'pe-grid' }, h('label', null, h('span', null, 'Name'), name), h('label', null, h('span', null, 'Plural'), plural)),
+    h('div', { class: 'pe-sec' }, h('span', { class: 'pe-label' }, 'Icon'), icons), h('div', { class: 'pe-sec' }, h('span', { class: 'pe-label' }, 'Color'), colors),
+    h('div', { class: 'pe-sec' }, h('span', { class: 'pe-label' }, 'Properties'), list,
+      h('button', { class: 'btn small', html: `${icon('plus', 13)}<span>Add property</span>`, onclick: () => { d.props.push({ label: '', kind: 'text', _new: true }); paintProps(); } }),
+      h('p', { class: 'muted small' }, 'Use “Object” to link to other types, for example Attendees → People. Linked objects show backlinks and appear in the graph.')),
+    h('div', { class: 'modal-actions pe-actions' }, del, h('span', { class: 'top-spacer' }), h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: save }, 'Save')));
+  const m = modal(body, { title: orig ? `Edit type · ${orig.name}` : 'New object type', wide: true });
+  paintPick(); paintProps(); if (!orig) setTimeout(() => name.focus(), 30);
 }
 
 // ---------- backlinks ----------
@@ -120,7 +251,7 @@ function refBlock(b, obj) {
   return row;
 }
 function refGroups(groups, label, extra) {
-  const n = groups.reduce((s, g) => s + g.blocks.length, 0);
+  const n = groups.reduce((s, g) => s + (g.blocks.length || (g.via?.length ? 1 : 0)), 0);
   const sec = h('section', { class: 'refs' });
   const bar = h('button', { class: 'refs-bar', html: `${icon('chevD', 14, 'caret')}<span>${label}</span><b>${n}</b>` });
   const body = h('div', { class: 'refs-body' });
@@ -128,6 +259,7 @@ function refGroups(groups, label, extra) {
     const t = typeOf(g.obj);
     body.append(h('div', { class: 'ref-group' },
       h('a', { class: 'ref-title', onclick: () => go('#/o/' + g.obj.id), style: { '--c': t.color }, html: `${icon(t.icon, 14)}<span>${esc(g.obj.title)}</span>` }),
+      g.via?.length ? h('div', { class: 'ref-via' }, `as ${g.via.join(', ')}`) : null,
       g.blocks.map((b) => { const el = refBlock(b, g.obj); if (extra) el.append(extra(b, g.obj)); return el; })));
   });
   bar.addEventListener('click', () => sec.classList.toggle('closed'));
@@ -342,12 +474,20 @@ export function renderCalendar(arg) {
 // ======================================================================
 // Type list
 // ======================================================================
+function cellText(o, c) {
+  const v = o.props?.[c.k];
+  if (c.kind === 'entity') return refObjects(o, c.k).map((x) => x.title).join(', ');
+  if (c.kind === 'boolean') return v === true ? '✓' : v === false ? '—' : '';
+  if (c.kind === 'date' && v) return String(v).split('->').map((x) => relDate(x.trim())).join(' → ');
+  return v ?? '';
+}
 export function renderType(tid) {
   const t = S.types[tid]; const root = main(); root.textContent = '';
   if (!t) return go('#/daily');
   setActions([]);
   S.settings.views ||= {};
-  const selectProp = (t.props || []).find((p) => p.kind === 'select');
+  const selects = (t.props || []).filter((p) => p.kind === 'select' && p.options?.length);
+  const selectProp = selects.find((p) => p.key === S.settings.views?.[tid + ':group']) || selects[0];
   const modes = [['grid', 'Gallery', 'grid'], ['table', 'Table', 'table'], ['list', 'List', 'list'], ...(selectProp ? [['board', `Board`, 'board']] : [])];
   let mode = S.settings.views[tid] || 'grid'; if (!modes.some((m) => m[0] === mode)) mode = 'grid';
   let q = ''; let tag = ''; let sort = { k: tid === 'daily' ? 'date' : 'updated', dir: -1 };
@@ -372,12 +512,13 @@ export function renderType(tid) {
     if (mode === 'grid') body.append(h('div', { class: 'grid' }, list.map(card)));
     else if (mode === 'list') body.append(h('div', { class: 'olist' }, list.map((o) => h('a', { class: 'orow', onclick: () => open(o), style: { '--c': t.color } }, typeBadge(t), h('span', { class: 'orow-title' }, o.title), h('span', { class: 'orow-prev' }, preview(o)), h('span', { class: 'orow-time' }, timeAgo(o.updated))))));
     else if (mode === 'table') {
-      const cols = [{ k: 'title', l: 'Title' }, ...(t.props || []).filter((p) => !['url'].includes(p.kind)).slice(0, 4).map((p) => ({ k: p.key, l: p.label, kind: p.kind })), { k: 'updated', l: 'Updated' }];
+      const cols = [{ k: 'title', l: 'Title' }, ...(t.props || []).filter((p) => p.kind !== 'richtext').slice(0, 5).map((p) => ({ k: p.key, l: p.label, kind: p.kind })), { k: 'updated', l: 'Updated' }];
       const th = (c) => h('th', { class: sort.k === c.k ? 'sorted' : '', onclick: () => { sort = { k: c.k, dir: sort.k === c.k ? -sort.dir : 1 }; paint(); } }, c.l, sort.k === c.k ? (sort.dir > 0 ? ' ↑' : ' ↓') : '');
       body.append(h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, cols.map(th))),
-        h('tbody', null, list.map((o) => h('tr', { onclick: () => open(o) }, cols.map((c) => h('td', { class: c.k === 'title' ? 'tt' : '' }, c.k === 'title' ? o.title : c.k === 'updated' ? timeAgo(o.updated) : c.kind === 'date' && o.props?.[c.k] ? relDate(o.props[c.k]) : o.props?.[c.k] || ''))))))));
+        h('tbody', null, list.map((o) => h('tr', { onclick: () => open(o) }, cols.map((c) => h('td', { class: c.k === 'title' ? 'tt' : '' }, c.k === 'title' ? o.title : c.k === 'updated' ? timeAgo(o.updated) : cellText(o, c)))))))));
     } else if (mode === 'board') {
       const opts = [...selectProp.options, ''];
+      if (selects.length > 1) body.append(h('div', { class: 'board-group' }, 'Group by', h('select', { class: 'input', onchange: (e) => { S.settings.views[tid + ':group'] = e.target.value; touch(); renderType(tid); } }, selects.map((p) => h('option', { value: p.key, selected: p.key === selectProp.key }, p.label)))));
       body.append(h('div', { class: 'board' }, opts.map((opt) => {
         const col = list.filter((o) => (o.props?.[selectProp.key] || '') === opt);
         const el = h('div', { class: 'col', 'data-opt': opt }, h('div', { class: 'col-head' }, h('span', null, opt || 'No ' + selectProp.label.toLowerCase()), h('b', null, col.length)), col.map((o) => { const c = card(o); c.draggable = true; c.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', o.id); }); return c; }));
@@ -392,7 +533,7 @@ export function renderType(tid) {
   const tagSel = allTags.length ? h('select', { class: 'input', onchange: (e) => { tag = e.target.value.toLowerCase(); paint(); } }, h('option', { value: '' }, 'All tags'), allTags.map((x) => h('option', { value: x }, '#' + x))) : null;
   const seg = h('div', { class: 'seg icons' }, modes.map(([k, l, ic]) => h('button', { class: k === mode ? 'on' : '', title: l, html: icon(ic, 15), onclick: (e) => { mode = k; S.settings.views[tid] = k; touch(); seg.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); paint(); } })));
   page.append(h('div', { class: 'view-head' }, h('h1', { class: 'with-ic', style: { '--c': t.color } }, typeBadge(t), t.plural),
-    tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>${tid === 'pdf' ? 'Import PDF' : 'New ' + esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) })),
+    h('span', { class: 'view-actions' }, tid === 'daily' ? null : h('button', { class: 'btn small', html: `${icon('edit', 13)}<span>Edit type</span>`, onclick: () => typeEditor(tid) }), tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>${tid === 'pdf' ? 'Import PDF' : 'New ' + esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) }))),
     h('div', { class: 'type-tools' }, search, tagSel, h('span', { class: 'top-spacer' }), seg), body);
   paint(); root.append(page);
 }
@@ -406,30 +547,73 @@ import { meetingBlocks as import_meetingBlocks } from './store.js';
 // ======================================================================
 // Graph
 // ======================================================================
-export function renderGraph() {
+export function renderGraph(focusId) {
   const root = main(); root.textContent = ''; setActions([]);
+  S.settings.graph ||= { hidden: [], daily: false, orphans: false, props: true, depth: 2 };
+  const G = S.settings.graph;
+  const focus = focusId ? getObject(focusId) : null;
   const page = h('div', { class: 'page graph-page' });
   const canvas = h('canvas', { class: 'graph' });
-  page.append(h('div', { class: 'view-head' }, h('h1', null, 'Graph'), h('span', { class: 'muted small' }, 'Drag to move · scroll to zoom · click to open')), canvas);
+  const bar = h('div', { class: 'g-bar' }); const legend = h('div', { class: 'g-legend' });
+  page.append(h('div', { class: 'view-head' }, h('h1', null, focus ? `Graph · ${focus.title}` : 'Graph'), h('span', { class: 'muted small' }, 'Drag to move · scroll to zoom · click to open')), bar, legend, canvas);
   root.append(page);
-  const objs = allObjects().filter((o) => o.type !== 'daily' || o.blocks.some((b) => b.text));
-  const byTitle = new Map(objs.map((o) => [o.title.toLowerCase(), o]));
-  const edges = []; const deg = new Map();
-  objs.forEach((o) => outgoing(o).forEach((l) => { const t = byTitle.get(l); if (t && t !== o) { edges.push([o, t]); deg.set(o.id, (deg.get(o.id) || 0) + 1); deg.set(t.id, (deg.get(t.id) || 0) + 1); } }));
-  const nodes = objs.filter((o) => deg.get(o.id)).map((o, i) => ({ o, x: Math.cos(i) * 150 + Math.random(), y: Math.sin(i) * 150 + Math.random(), vx: 0, vy: 0, r: 5 + Math.min(10, Math.sqrt(deg.get(o.id)) * 2.4) }));
-  const idx = new Map(nodes.map((n) => [n.o.id, n]));
-  const links = edges.map(([a, b]) => [idx.get(a.id), idx.get(b.id)]).filter(([a, b]) => a && b);
-  if (!nodes.length) { canvas.replaceWith(h('div', { class: 'empty small' }, h('p', null, 'Link objects with [[double brackets]] to grow your graph.'))); return; }
-  const ctx = canvas.getContext('2d'); let W; let H; let scale = 1; let ox = 0; let oy = 0; let hover = null; let drag = null; let alive = true; let heat = 1;
+  const save = () => touch();
+
+  // --- build the data set from text links and object-type properties ---
+  const all = allObjects();
+  const lookup = new Map(); all.forEach((o) => { lookup.set(o.title.trim().toLowerCase(), o); });
+  all.forEach((o) => (o.aliases || []).forEach((a) => { if (!lookup.has(a.trim().toLowerCase())) lookup.set(a.trim().toLowerCase(), o); }));
+  const edges = new Map();
+  const addEdge = (a, b, kind) => { if (!a || !b || a === b) return; const k = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id; const e = edges.get(k); if (e) { if (kind === 'prop') e.kind = 'prop'; } else edges.set(k, { a, b, kind }); };
+  all.forEach((o) => {
+    walk(o.blocks, (blk) => linksIn(blk.text).forEach((l) => addEdge(o, lookup.get(l), 'text')));
+    if (G.props) propRefs(o).forEach((r) => addEdge(o, r.target, 'prop'));
+  });
+  const eList = [...edges.values()];
+  const adj = new Map(); eList.forEach((e) => { (adj.get(e.a.id) || adj.set(e.a.id, []).get(e.a.id)).push(e.b.id); (adj.get(e.b.id) || adj.set(e.b.id, []).get(e.b.id)).push(e.a.id); });
+  const typeCounts = {}; all.forEach((o) => { typeCounts[o.type] = (typeCounts[o.type] || 0) + 1; });
+
+  let nodes = []; let links = []; let heat = 1; let hover = null; let drag = null; let query = '';
+  const rebuild = () => {
+    let keep;
+    if (focus) { keep = new Set([focus.id]); let frontier = [focus.id]; for (let d = 0; d < G.depth; d++) { const nx = []; frontier.forEach((id) => (adj.get(id) || []).forEach((n) => { if (!keep.has(n)) { keep.add(n); nx.push(n); } })); frontier = nx; } }
+    const visible = (o) => (o.id === focus?.id) || (!G.hidden.includes(o.type) && (G.daily || o.type !== 'daily'));
+    const pool = all.filter((o) => (!keep || keep.has(o.id)) && visible(o));
+    const ids = new Set(pool.map((o) => o.id));
+    const ls = eList.filter((e) => ids.has(e.a.id) && ids.has(e.b.id));
+    const deg = new Map(); ls.forEach((e) => { deg.set(e.a.id, (deg.get(e.a.id) || 0) + 1); deg.set(e.b.id, (deg.get(e.b.id) || 0) + 1); });
+    const old = new Map(nodes.map((n) => [n.o.id, n]));
+    nodes = pool.filter((o) => G.orphans || deg.get(o.id) || o.id === focus?.id).map((o, i) => { const n = old.get(o.id); const r = 5 + Math.min(11, Math.sqrt(deg.get(o.id) || 0) * 2.6) + (o.id === focus?.id ? 4 : 0); return n ? Object.assign(n, { r, deg: deg.get(o.id) || 0 }) : { o, x: Math.cos(i * 2.4) * (60 + i * 6), y: Math.sin(i * 2.4) * (60 + i * 6), vx: 0, vy: 0, r, deg: deg.get(o.id) || 0 }; });
+    const idx = new Map(nodes.map((n) => [n.o.id, n]));
+    links = ls.map((e) => ({ a: idx.get(e.a.id), b: idx.get(e.b.id), kind: e.kind })).filter((l) => l.a && l.b);
+    heat = 1; paintBar();
+  };
+
+  const paintBar = () => {
+    bar.textContent = '';
+    const tog = (label, key, extra) => h('label', { class: 'g-toggle' }, h('input', { type: 'checkbox', checked: !!G[key], onchange: (e) => { G[key] = e.target.checked; save(); if (key === 'props') return renderGraph(focusId); rebuild(); } }), h('span', null, label));
+    bar.append(...[h('input', { class: 'input search', placeholder: 'Find in graph…', value: query, oninput: (e) => { query = e.target.value.toLowerCase(); } }),
+      tog('Daily notes', 'daily'), tog('Unlinked', 'orphans'), tog('Property links', 'props'),
+      focus ? h('span', { class: 'g-depth' }, 'Depth', h('select', { class: 'input', onchange: (e) => { G.depth = +e.target.value; save(); rebuild(); } }, [1, 2, 3].map((n) => h('option', { value: n, selected: n === G.depth }, n))), h('a', { class: 'btn small', onclick: () => go('#/graph') }, 'Show all'), h('a', { class: 'btn small', onclick: () => go('#/o/' + focus.id) }, 'Open note')) : null].filter(Boolean));
+    legend.textContent = '';
+    Object.values(S.types).filter((t) => typeCounts[t.id]).forEach((t) => {
+      const off = G.hidden.includes(t.id);
+      legend.append(h('button', { class: `g-chip${off ? ' off' : ''}`, style: { '--c': t.color }, title: off ? 'Show' : 'Hide', onclick: () => { G.hidden = off ? G.hidden.filter((x) => x !== t.id) : [...G.hidden, t.id]; save(); rebuild(); }, html: `<i></i><span>${esc(t.plural)}</span><em>${typeCounts[t.id]}</em>` }));
+    });
+    legend.append(h('span', { class: 'g-key' }, h('i', { class: 'k-text' }), 'Text link', h('i', { class: 'k-prop' }), 'Property'));
+  };
+
+  const ctx = canvas.getContext('2d'); let W; let H; let scale = 1; let ox = 0; let oy = 0; let alive = true;
   const dpr = window.devicePixelRatio || 1;
   const resize = () => { const r = canvas.getBoundingClientRect(); W = r.width; H = r.height; canvas.width = W * dpr; canvas.height = H * dpr; };
-  resize(); ox = W / 2; oy = H / 2;
+  rebuild(); resize(); ox = W / 2; oy = H / 2;
+  if (!nodes.length) { canvas.replaceWith(h('div', { class: 'empty small' }, h('p', null, focus ? 'Nothing linked to this object yet.' : 'Link objects with [[double brackets]] or object-type properties to grow your graph.'))); return; }
   const css = getComputedStyle(document.documentElement);
   const step = () => {
     if (!alive || !canvas.isConnected) return;
     if (heat > 0.02) {
-      for (const a of nodes) for (const b of nodes) { if (a === b) continue; let dx = a.x - b.x; let dy = a.y - b.y; let d2 = dx * dx + dy * dy + 0.1; if (d2 > 90000) continue; const f = 2600 / d2; const d = Math.sqrt(d2); a.vx += (dx / d) * f; a.vy += (dy / d) * f; }
-      for (const [a, b] of links) { const dx = b.x - a.x; const dy = b.y - a.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; const f = (d - 90) * 0.012; a.vx += (dx / d) * f; a.vy += (dy / d) * f; b.vx -= (dx / d) * f; b.vy -= (dy / d) * f; }
+      for (const a of nodes) for (const b of nodes) { if (a === b) continue; const dx = a.x - b.x; const dy = a.y - b.y; const d2 = dx * dx + dy * dy + 0.1; if (d2 > 90000) continue; const f = 2600 / d2; const d = Math.sqrt(d2); a.vx += (dx / d) * f; a.vy += (dy / d) * f; }
+      for (const l of links) { const dx = l.b.x - l.a.x; const dy = l.b.y - l.a.y; const d = Math.sqrt(dx * dx + dy * dy) || 1; const f = (d - 90) * 0.012; l.a.vx += (dx / d) * f; l.a.vy += (dy / d) * f; l.b.vx -= (dx / d) * f; l.b.vy -= (dy / d) * f; }
       for (const n of nodes) { n.vx -= n.x * 0.003; n.vy -= n.y * 0.003; if (n !== drag) { n.x += n.vx * heat; n.y += n.vy * heat; } n.vx *= 0.82; n.vy *= 0.82; }
       heat *= 0.992;
     }
@@ -438,14 +622,22 @@ export function renderGraph() {
   const draw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
     ctx.translate(ox, oy); ctx.scale(scale, scale);
-    const line = css.getPropertyValue('--line-strong').trim() || '#ccc'; const text = css.getPropertyValue('--text').trim() || '#222';
-    const hl = new Set(); if (hover) links.forEach(([a, b]) => { if (a === hover) hl.add(b); if (b === hover) hl.add(a); });
+    const line = css.getPropertyValue('--line-strong').trim() || '#ccc'; const text = css.getPropertyValue('--text').trim() || '#222'; const accent = css.getPropertyValue('--accent').trim() || '#6558f5';
+    const near = new Set(); if (hover) links.forEach((l) => { if (l.a === hover) near.add(l.b); if (l.b === hover) near.add(l.a); });
+    const match = (n) => query && n.o.title.toLowerCase().includes(query);
     ctx.lineWidth = 1 / scale;
-    for (const [a, b] of links) { ctx.strokeStyle = hover && (a === hover || b === hover) ? typeOf(hover.o).color : line; ctx.globalAlpha = hover && a !== hover && b !== hover ? 0.25 : 0.9; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    for (const l of links) {
+      const on = hover && (l.a === hover || l.b === hover);
+      ctx.strokeStyle = on ? typeOf(hover.o).color : l.kind === 'prop' ? accent : line; ctx.globalAlpha = hover && !on ? 0.2 : l.kind === 'prop' ? 0.75 : 0.9; ctx.setLineDash(l.kind === 'prop' ? [] : [4 / scale, 3 / scale]);
+      ctx.lineWidth = (l.kind === 'prop' ? 1.8 : 1) / scale; ctx.beginPath(); ctx.moveTo(l.a.x, l.a.y); ctx.lineTo(l.b.x, l.b.y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
     for (const n of nodes) {
-      ctx.globalAlpha = hover && n !== hover && !hl.has(n) ? 0.3 : 1;
+      const dim = (hover && n !== hover && !near.has(n)) || (query && !match(n));
+      ctx.globalAlpha = dim ? 0.18 : 1;
       ctx.fillStyle = typeOf(n.o).color; ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 7); ctx.fill();
-      if (scale > 0.65 || n === hover || n.r > 9) { ctx.fillStyle = text; ctx.font = `${n === hover ? 600 : 500} ${12 / Math.max(scale, 0.8)}px Inter, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(n.o.title.length > 28 ? n.o.title.slice(0, 27) + '…' : n.o.title, n.x, n.y + n.r + 14 / Math.max(scale, 0.8)); }
+      if (n.o.id === focus?.id || match(n)) { ctx.strokeStyle = text; ctx.lineWidth = 2 / scale; ctx.stroke(); }
+      if (!dim && (scale > 0.65 || n === hover || n.r > 9 || match(n))) { ctx.fillStyle = text; ctx.font = `${n === hover || n.o.id === focus?.id ? 600 : 500} ${12 / Math.max(scale, 0.8)}px Inter, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(n.o.title.length > 28 ? n.o.title.slice(0, 27) + '…' : n.o.title, n.x, n.y + n.r + 14 / Math.max(scale, 0.8)); }
     }
     ctx.globalAlpha = 1;
   };
@@ -453,11 +645,12 @@ export function renderGraph() {
   const pick = (e) => { const p = pt(e); return nodes.find((n) => (n.x - p.x) ** 2 + (n.y - p.y) ** 2 <= (n.r + 4) ** 2) || null; };
   let moved = false; let pan = null;
   canvas.addEventListener('mousedown', (e) => { moved = false; const n = pick(e); if (n) { drag = n; heat = Math.max(heat, 0.4); } else pan = { x: e.clientX - ox, y: e.clientY - oy }; });
-  window.addEventListener('mouseup', () => { drag = null; pan = null; });
+  const up = () => { drag = null; pan = null; }; window.addEventListener('mouseup', up);
   canvas.addEventListener('mousemove', (e) => { moved = true; if (drag) { const p = pt(e); drag.x = p.x; drag.y = p.y; heat = Math.max(heat, 0.3); } else if (pan) { ox = e.clientX - pan.x; oy = e.clientY - pan.y; } else { hover = pick(e); canvas.style.cursor = hover ? 'pointer' : 'grab'; } });
-  canvas.addEventListener('click', (e) => { const n = pick(e); if (n && !moved) go('#/o/' + n.o.id); });
+  canvas.addEventListener('click', (e) => { const n = pick(e); if (n && !moved) go(n.o.type === 'daily' ? '#/daily/' + n.o.date : '#/o/' + n.o.id); });
+  canvas.addEventListener('dblclick', (e) => { const n = pick(e); if (n) go('#/graph/' + n.o.id); });
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0012); const r = canvas.getBoundingClientRect(); const mx = e.clientX - r.left; const my = e.clientY - r.top; ox = mx - (mx - ox) * k; oy = my - (my - oy) * k; scale *= k; }, { passive: false });
-  window.addEventListener('hashchange', () => { alive = false; }, { once: true });
+  window.addEventListener('hashchange', () => { alive = false; window.removeEventListener('mouseup', up); }, { once: true });
   requestAnimationFrame(step);
 }
 
@@ -546,15 +739,11 @@ export function renderSettings() {
   const typeList = h('div', { class: 'type-list' });
   const paintTypes = () => {
     typeList.textContent = '';
-    Object.values(S.types).filter((t) => t.id !== 'daily').forEach((t) => typeList.append(h('div', { class: 'type-item' }, typeBadge(t), h('span', null, t.name), h('small', null, `${objectsOfType(t.id).length}`), t.builtin ? null : h('button', { class: 'icon-btn small', html: icon('trash', 13), onclick: async () => { if (objectsOfType(t.id).length) return toast('Move or delete its objects first'); delete S.types[t.id]; save(); paintTypes(); rerender(); } }))));
+    Object.values(S.types).filter((t) => t.id !== 'daily').forEach((t) => typeList.append(h('button', { class: 'type-item', onclick: () => typeEditor(t.id) }, typeBadge(t), h('span', null, t.name), h('small', null, `${(t.props || []).length} props · ${objectsOfType(t.id).length}`), h('span', { class: 'type-edit', html: icon('edit', 13) }))));
   };
   paintTypes();
-  const tName = h('input', { class: 'input', placeholder: 'New type, e.g. Recipe' });
-  let tIcon = 'file'; let tColor = '#ef4444';
-  const icons = h('div', { class: 'icon-pick' }, ICON_NAMES.map((n) => h('button', { class: n === tIcon ? 'on' : '', html: icon(n, 15), onclick: (e) => { tIcon = n; icons.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); } })));
-  const colors = h('div', { class: 'color-pick' }, ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#0ea5e9', '#6366f1', '#a855f7', '#ec4899'].map((c) => h('button', { style: { background: c }, class: c === tColor ? 'on' : '', onclick: (e) => { tColor = c; colors.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); } })));
-  page.append(sec('Object types', 'Every note is an object with a type. Add your own.', typeList,
-    h('div', { class: 'set-form col' }, tName, icons, colors, h('button', { class: 'btn primary', onclick: () => { const n = tName.value.trim(); if (!n) return; const id = n.toLowerCase().replace(/[^a-z0-9]+/g, '-'); if (S.types[id]) return toast('That type exists'); S.types[id] = { id, name: n, plural: n + 's', icon: tIcon, color: tColor, props: [] }; tName.value = ''; save(); paintTypes(); rerender(); } }, 'Add type'))));
+  page.append(sec('Object types', 'Every note is an object with a type. Edit a type to rename it, change its icon and color, or add properties. An “Object” property links to other types, like Attendees to People.', typeList,
+    h('div', { class: 'set-actions' }, h('button', { class: 'btn primary', html: `${icon('plus', 14)}<span>New type</span>`, onclick: () => typeEditor(null) }))));
 
   // Data
   const imp = h('input', { type: 'file', accept: '.json', style: { display: 'none' }, onchange: async (e) => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (!d.objects) throw new Error('Not a Folio export'); if (!(await confirmBox('Replace all current data with this file?', 'Replace'))) return; Object.assign(S, d); touch(null, true); location.hash = '#/daily'; location.reload(); } catch (err) { toast(err.message, { kind: 'warn' }); } } });
@@ -626,7 +815,7 @@ export function panelContent(obj) {
     h('div', { class: 'pn-info' }, h('span', null, 'Type'), h('b', null, t.name)), h('div', { class: 'pn-info' }, h('span', null, 'Words'), h('b', null, words)),
     tasks ? h('div', { class: 'pn-info' }, h('span', null, 'Tasks'), h('b', null, `${done}/${tasks}`)) : null,
     h('div', { class: 'pn-info' }, h('span', null, 'Updated'), h('b', null, timeAgo(obj.updated))),
-    h('div', { class: 'pn-actions' }, h('button', { class: 'btn small', onclick: () => present(obj), html: `${icon('play', 12)}<span>Present</span>` }), h('button', { class: 'btn small', onclick: () => historyModal(obj), html: `${icon('history', 12)}<span>History</span>` }))));
+    h('div', { class: 'pn-actions' }, h('button', { class: 'btn small', onclick: () => present(obj), html: `${icon('play', 12)}<span>Present</span>` }), h('button', { class: 'btn small', onclick: () => historyModal(obj), html: `${icon('history', 12)}<span>History</span>` }), h('button', { class: 'btn small', onclick: () => go('#/graph/' + obj.id), html: `${icon('graph', 12)}<span>Graph</span>` }))));
   return wrap;
 }
 

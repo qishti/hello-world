@@ -26,19 +26,21 @@ export function showMenu({ x, y, items, onPick, anchor, header, width, keepFocus
     },
     pick() { const it = items[active]; if (it && !it.sep && !it.head) { closeMenu(); onPick(it); return true; } return false; },
   };
+  const headEl = header ? h('div', { class: 'menu-search' }, header) : null;
+  const listEl = h('div', { class: 'menu-list' });
+  el.append(...(headEl ? [headEl, listEl] : [listEl]));
   function paint() {
-    el.textContent = '';
-    if (header) el.append(h('div', { class: 'menu-head' }, header));
-    if (!items.length) { el.append(h('div', { class: 'menu-empty' }, 'No results')); }
+    listEl.textContent = '';
+    if (!items.length) { listEl.append(h('div', { class: 'menu-empty' }, 'No results')); }
     items.forEach((it, i) => {
-      if (it.sep) return el.append(h('div', { class: 'menu-sep' }));
-      if (it.head) return el.append(h('div', { class: 'menu-head' }, it.head));
-      const row = h('div', { class: `menu-item${i === active ? ' active' : ''}${it.danger ? ' danger' : ''}`, onmouseenter: () => { active = i; el.querySelectorAll('.menu-item').forEach((r, j) => r.classList.toggle('active', j === [...el.querySelectorAll('.menu-item')].indexOf(row))); }, onclick: () => { closeMenu(); onPick(it); } },
+      if (it.sep) return listEl.append(h('div', { class: 'menu-sep' }));
+      if (it.head) return listEl.append(h('div', { class: 'menu-head' }, it.head));
+      const row = h('div', { class: `menu-item${i === active ? ' active' : ''}${it.danger ? ' danger' : ''}`, onmouseenter: () => { active = i; listEl.querySelectorAll('.menu-item').forEach((r) => r.classList.toggle('active', r === row)); }, onclick: () => { closeMenu(); onPick(it); } },
         it.icon ? h('span', { class: 'menu-ic', style: it.color ? { '--c': it.color } : {}, html: icon(it.icon, 15) }) : null,
         h('span', { class: 'menu-label' }, it.label),
         it.sub ? h('span', { class: 'menu-sub' }, it.sub) : null,
         it.check ? h('span', { class: 'menu-check' }, '✓') : null);
-      el.append(row);
+      listEl.append(row);
     });
     el.querySelector('.menu-item.active')?.scrollIntoView({ block: 'nearest' });
   }

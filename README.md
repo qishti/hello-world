@@ -35,6 +35,15 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Version history per object, with preview and restore.
 - Presentation mode: top-level bullets become slides.
 
+**Types and properties (modeled on a Capacities space)**
+- Edit any type (name, icon, color) or create new ones from the sidebar `+`, Settings, an object's type pill, or a type page.
+- Property kinds: Text, Long text, Number, Date (single day or a range), Label (single choice with your own options), Checkbox, Link, and **Object**.
+- **Object properties** link to other types, for example Meeting → Attendees (People), Person → Organization, Project → Collaborators. Pick existing objects or create one on the spot. Linked objects show backlinks "as Attendees", and the links appear in the graph.
+- Built-in types follow Capacities' defaults: Page, Person, Organization, Meeting, Project, plus Source, PDF, Idea and Tag. Existing data is upgraded in place.
+- Calendar meeting notes now fill the Attendees property with Person objects, matched by email.
+- Graph: color-coded by type, with type filters, daily notes and unlinked toggles, search, property links drawn solid and text links dashed, and a local graph (depth 1 to 3) for any object via its panel or by double-clicking a node.
+- Table and Board views understand all property kinds; Board can group by any Label property.
+
 **Email in**
 - Email or forward items to yourself. Each one lands in that day's daily note as a bullet tagged `#email`, with the body as child bullets. Quoted replies and signatures are trimmed, links and attachment names are listed.
 - A subject starting with `todo:` becomes a task due that day.

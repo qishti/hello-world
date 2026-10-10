@@ -38,6 +38,10 @@ const P = {
   zoomIn: '<circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/>',
   zoomOut: '<circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3M8 11h6"/>',
   highlighter: '<path d="m9 11-6 6v3h9l3-3M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
+  building: '<path d="M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 7h3M8 11h3M8 15h3"/>',
+  trashx: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+  up: '<path d="m6 15 6-6 6 6"/>',
+  edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   mic: '<rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
@@ -56,4 +60,4 @@ const P = {
 export function icon(name, size = 16, cls = '') {
   return `<svg class="ic ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || P.file}</svg>`;
 }
-export const ICON_NAMES = ['pdf', 'file', 'user', 'users', 'book', 'folder', 'bulb', 'hash', 'star', 'calendar', 'check', 'graph', 'inbox', 'mic', 'sparkle'];
+export const ICON_NAMES = ['building', 'pdf', 'file', 'user', 'users', 'book', 'folder', 'bulb', 'hash', 'star', 'calendar', 'check', 'graph', 'inbox', 'mic', 'sparkle'];

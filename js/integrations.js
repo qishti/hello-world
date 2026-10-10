@@ -69,20 +69,20 @@ export function meetingForEvent(ev) {
 /** Create (or return) a meeting note for a calendar event; attendees become linked Person objects. */
 export function meetingFromEvent(ev) {
   const found = meetingForEvent(ev); if (found) return found;
-  const names = [];
-  for (const a of ev.attendees.slice(0, 12)) {
+  const people = [];
+  for (const a of ev.attendees.slice(0, 20)) {
     if (!a.email && !a.name) continue;
     const name = prettyName(a);
-    let p = findByTitle(name);
+    let p = Object.values(S.objects).find((o) => o.type === 'person' && ((a.email && o.props?.email?.toLowerCase() === a.email.toLowerCase()) || o.title.toLowerCase() === name.toLowerCase())) || findByTitle(name);
     if (!p) p = createObject({ type: 'person', title: name, props: a.email ? { email: a.email } : {} });
-    names.push(`[[${p.title}]]`);
+    if (!people.includes(p)) people.push(p);
   }
   const date = new Date(ev.start);
   let title = ev.title; let n = 2;
   while (findByTitle(title) && findByTitle(title).props?.eventId !== ev.id) title = `${ev.title} (${dateKey(date)}${n > 2 ? ' ' + n : ''})`, n++;
   return createObject({
-    type: 'meeting', title, blocks: meetingBlocks(names.join(' ')),
-    props: { date: dateKey(date), time: eventTime(ev), location: ev.location || '', link: ev.link || '', eventId: ev.id },
+    type: 'meeting', title, blocks: meetingBlocks(),
+    props: { date: dateKey(date), attendees: people.map((p) => p.id), time: eventTime(ev), location: ev.location || '', link: ev.link || '', eventId: ev.id },
   });
 }
 
