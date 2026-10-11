@@ -100,9 +100,9 @@ function miniCal() {
     h('div', { class: 'mini-grid' }, ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => h('i', { class: 'dow' }, d)),
       Array.from({ length: 42 }, (_, i) => {
         const d = new Date(start); d.setDate(d.getDate() + i); const k = dateKey(d);
-        const o = S.objects['d-' + k]; const has = o && o.blocks.some((b) => b.text || b.children.length);
+        const o = S.objects['d-' + k]; const has = o && o.blocks.some((b) => b.text || b.children.length); const rev = !!o?.props?.reviewed;
         const ev = I.hasCalendars() && I.eventsOn(k).length;
-        return h('a', { href: '#/daily/' + k, class: `d${d.getMonth() !== m ? ' out' : ''}${k === today ? ' today' : ''}${k === sel ? ' sel' : ''}` }, d.getDate(), has || ev ? h('u', { class: ev && !has ? 'evd' : '' }) : null);
+        return h('a', { href: '#/daily/' + k, class: `d${d.getMonth() !== m ? ' out' : ''}${k === today ? ' today' : ''}${k === sel ? ' sel' : ''}${rev ? ' rev' : ''}` }, d.getDate(), has || ev || rev ? h('u', { class: rev ? 'rv' : ev && !has ? 'evd' : '' }) : null);
       })));
   return el;
 }

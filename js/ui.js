@@ -60,6 +60,21 @@ function place(el, x, y, anchor) {
   el.style.left = Math.max(8, x) + 'px'; el.style.top = y + 'px';
 }
 
+/** Free-form popover anchored under an element; closes on outside click or Escape. */
+export function popover(anchor, content, { width } = {}) {
+  closeMenu();
+  const el = h('div', { class: 'menu popover free', style: width ? { width: width + 'px' } : {} }, content);
+  document.body.append(el);
+  const away = (e) => { if (!el.contains(e.target) && !e.target.closest('.menu')) closeMenu(); };
+  document.addEventListener('mousedown', away, true);
+  const key = (e) => { if (e.key === 'Escape') closeMenu(); };
+  document.addEventListener('keydown', key);
+  current = { el, away: (e) => away(e), items: [], update() {}, move() {}, pick: () => false };
+  const orig = current.el.remove.bind(current.el); current.el.remove = () => { document.removeEventListener('keydown', key); orig(); };
+  place(el, 0, 0, anchor);
+  return el;
+}
+
 // ---------- caret position inside a textarea ----------
 export function caretXY(ta, pos = ta.selectionStart) {
   const cs = getComputedStyle(ta);

@@ -1,7 +1,7 @@
 import { uid, dailyTitle, titleToKey, todayKey, debounce, dateKey, addDays, parseKey } from './util.js';
 
 export const BUILTIN_TYPES = {
-  daily: { id: 'daily', name: 'Daily note', plural: 'Daily notes', icon: 'calendar', color: '#8b5cf6', builtin: true, props: [] },
+  daily: { id: 'daily', name: 'Daily note', plural: 'Daily notes', icon: 'calendar', color: '#8b5cf6', builtin: true, props: [{ key: 'reviewed', label: 'Reviewed', kind: 'boolean' }] },
   page: { id: 'page', name: 'Page', plural: 'Pages', icon: 'file', color: '#64748b', builtin: true, props: [] },
   person: {
     id: 'person', name: 'Person', plural: 'People', icon: 'user', color: '#f59e0b', builtin: true,
@@ -74,7 +74,7 @@ export async function deleteFile(id) {
   await new Promise((res) => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').delete(id); tx.oncomplete = res; tx.onerror = res; });
 }
 
-const isEmptyDaily = (o) => o.type === 'daily' && !hasContent(o.blocks);
+const isEmptyDaily = (o) => o.type === 'daily' && !hasContent(o.blocks) && !o.props?.reviewed;
 const hasContent = (blocks) => blocks.some((b) => b.text.trim() || b.task || b.children.length);
 
 function serialize() {
@@ -310,14 +310,14 @@ export async function load() {
   S.settings = { ...fresh().settings, ...S.settings };
   S.cache = { ...fresh().cache, ...S.cache };
   S.favorites ||= [];
-  if (!S.typesVersion || S.typesVersion < 2) {
-    // v2 adds object-reference properties to the built-in types without touching your edits.
+  if (!S.typesVersion || S.typesVersion < 3) {
+    // v2 added object-reference properties and v3 the daily-note Reviewed checkbox, without touching your edits.
     for (const [id, b] of Object.entries(BUILTIN_TYPES)) {
       const t = S.types[id]; if (!t) continue;
       t.props ||= [];
       for (const p of b.props) if (!t.props.some((x) => x.key === p.key)) t.props.push(structuredClone(p));
     }
-    S.typesVersion = 2;
+    S.typesVersion = 3;
   }
   if (first) seed();
   index = null;

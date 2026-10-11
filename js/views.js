@@ -8,6 +8,7 @@ import * as I from './integrations.js';
 import * as hooks from './hooks.js';
 import { objectToMarkdown, downloadZip, downloadSingle } from './export.js';
 import { Reader } from './reader.js';
+export { renderType } from './database.js';
 import { pickFiles, importFiles, ACCEPT } from './importer.js';
 
 let reader = null;
@@ -17,9 +18,11 @@ export const go = (hash) => { location.hash = hash; };
 const main = () => document.getElementById('main-body');
 let setActions = () => {};
 export const bindChrome = (fn) => { setActions = fn; };
+export const mainEl = () => main();
+export const setActionsFn = (n) => setActions(n);
 const rerender = () => window.dispatchEvent(new Event('folio:refresh'));
 
-function typeBadge(t) { return h('span', { class: 'type-ic', style: { '--c': t.color }, html: icon(t.icon, 14) }); }
+export function typeBadge(t) { return h('span', { class: 'type-ic', style: { '--c': t.color }, html: icon(t.icon, 14) }); }
 
 // ======================================================================
 // Object page
@@ -88,11 +91,11 @@ function objActions(obj) {
   ];
 }
 
-const hashColor = (str) => { let n = 0; for (const c of str) n = (n * 31 + c.charCodeAt(0)) >>> 0; return ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444', '#14b8a6'][n % 8]; };
+export const hashColor = (str) => { let n = 0; for (const c of str) n = (n * 31 + c.charCodeAt(0)) >>> 0; return ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444', '#14b8a6'][n % 8]; };
 const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /** Pick an existing object (restricted to allowed types) or create one on the spot. */
-function pickObject(anchor, d, exclude, onPick) {
+export function pickObject(anchor, d, exclude, onPick) {
   const allowed = d.types?.length ? d.types.filter((t) => S.types[t]) : Object.keys(S.types).filter((t) => t !== 'daily');
   const input = h('input', { class: 'menu-input', placeholder: `Find ${allowed.length === 1 ? S.types[allowed[0]].plural.toLowerCase() : 'objects'}…` });
   const items = () => {
@@ -119,7 +122,7 @@ function pickObject(anchor, d, exclude, onPick) {
   setTimeout(() => input.focus(), 10);
 }
 
-function entityEditor(obj, d) {
+export function entityEditor(obj, d) {
   const box = h('div', { class: 'ent' });
   const paint = () => {
     box.textContent = '';
@@ -282,6 +285,16 @@ function refsSection(obj) {
 // ======================================================================
 // Daily note
 // ======================================================================
+function reviewToggle(obj) {
+  const on = !!obj.props.reviewed;
+  return h('button', { class: `review${on ? ' on' : ''}`, title: on ? 'Reviewed. Click to undo.' : 'Mark this day as reviewed', html: `<span class="rv-box">${on ? icon('check', 12) : ''}</span><span>${on ? 'Reviewed' : 'Review'}</span>`, onclick: () => { obj.props.reviewed = !on; touch(obj, true); rerender(); } });
+}
+function reviewNudge(key) {
+  const y = ensureDaily(addDays(key, -1));
+  const has = y.blocks.some((b) => b.text.trim() || b.children.length);
+  if (!has || y.props.reviewed) return null;
+  return h('div', { class: 'card hint nudge' }, h('span', { html: icon('check', 16) }), h('span', null, 'Yesterday has not been reviewed.'), h('a', { class: 'link', onclick: () => go('#/daily/' + y.date) }, 'Review it'));
+}
 export function renderDaily(key) {
   key ||= todayKey();
   const obj = ensureDaily(key); setViewObj(obj);
@@ -295,9 +308,11 @@ export function renderDaily(key) {
       h('h1', { class: 'daily-title' }, WEEKDAYS[d.getDay()]),
       h('div', { class: 'daily-date' }, `${MONTHS_LONG[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`)),
     h('div', { class: 'daily-nav' },
+      reviewToggle(obj),
       h('button', { class: 'icon-btn round', title: 'Previous day', html: icon('chevL', 18), onclick: () => go('#/daily/' + addDays(key, -1)) }),
       h('button', { class: 'icon-btn round', title: 'Next day', html: icon('chevR', 18), onclick: () => go('#/daily/' + addDays(key, 1)) }))));
   const cards = h('div', { class: 'cards' });
+  if (isToday) { const nd = reviewNudge(key); if (nd) cards.append(nd); }
   const ag = agendaCard(key); if (ag) cards.append(ag);
   const tk = dayTasksCard(key); if (tk) cards.append(tk);
   if (cards.children.length) page.append(cards);
@@ -463,7 +478,7 @@ export function renderCalendar(arg) {
     const dayEvs = evs.filter((e) => { const s = dateKey(new Date(e.start)); return s === k || (e.allDay && e.start <= d.getTime() && e.end > d.getTime()); });
     const has = S.objects['d-' + k] && (S.objects['d-' + k].blocks.some((b) => b.text || b.children.length));
     grid.append(h('div', { class: `day${d.getMonth() !== m ? ' out' : ''}${k === today ? ' today' : ''}`, onclick: (e) => { if (!e.target.closest('.pill')) go('#/daily/' + k); } },
-      h('div', { class: 'day-num' }, h('span', null, d.getDate()), has ? h('i', { class: 'dot', title: 'Has notes' }) : null, tasksBy[k] ? h('em', { class: 'task-count', title: 'Tasks due' }, tasksBy[k]) : null),
+      h('div', { class: 'day-num' }, h('span', null, d.getDate()), has ? h('i', { class: 'dot', title: 'Has notes' }) : null, S.objects['d-' + k]?.props?.reviewed ? h('em', { class: 'rv-mark', title: 'Reviewed', html: icon('check', 11) }) : null, tasksBy[k] ? h('em', { class: 'task-count', title: 'Tasks due' }, tasksBy[k]) : null),
       dayEvs.slice(0, 3).map((e) => h('div', { class: `pill${e.allDay ? ' allday' : ''}`, style: { '--c': e.color || 'var(--accent)' }, title: `${e.title}\n${I.eventTime(e)}`, onclick: () => go('#/o/' + (I.meetingForEvent(e) || I.meetingFromEvent(e)).id) }, e.allDay ? '' : h('b', null, fmtTime(new Date(e.start)).replace(' ', '')), ' ', e.title)),
       dayEvs.length > 3 ? h('div', { class: 'more' }, `+${dayEvs.length - 3} more`) : null));
   }
@@ -475,14 +490,7 @@ export function renderCalendar(arg) {
 // ======================================================================
 // Type list
 // ======================================================================
-function cellText(o, c) {
-  const v = o.props?.[c.k];
-  if (c.kind === 'entity') return refObjects(o, c.k).map((x) => x.title).join(', ');
-  if (c.kind === 'boolean') return v === true ? '✓' : v === false ? '—' : '';
-  if (c.kind === 'date' && v) return String(v).split('->').map((x) => relDate(x.trim())).join(' → ');
-  return v ?? '';
-}
-function dropZone() {
+export function dropZone() {
   const z = h('div', { class: 'dropzone', tabindex: '0', role: 'button' },
     h('div', { class: 'dz-ic', html: icon('pdf', 26) }),
     h('div', { class: 'dz-main' }, h('b', null, 'Drop PDFs here'), h('span', null, 'or click to browse. You can drop several at once, plus Word, Markdown, text and images.')));
@@ -492,63 +500,6 @@ function dropZone() {
   z.addEventListener('dragleave', (e) => { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); });
   z.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); z.classList.remove('over'); document.querySelector('.drop-overlay')?.remove(); const f = [...(e.dataTransfer?.files || [])]; if (f.length) handleImport(f, null); });
   return z;
-}
-export function renderType(tid) {
-  const t = S.types[tid]; const root = main(); root.textContent = '';
-  if (!t) return go('#/daily');
-  setActions([]);
-  S.settings.views ||= {};
-  const selects = (t.props || []).filter((p) => p.kind === 'select' && p.options?.length);
-  const selectProp = selects.find((p) => p.key === S.settings.views?.[tid + ':group']) || selects[0];
-  const modes = [['grid', 'Gallery', 'grid'], ['table', 'Table', 'table'], ['list', 'List', 'list'], ...(selectProp ? [['board', `Board`, 'board']] : [])];
-  let mode = S.settings.views[tid] || 'grid'; if (!modes.some((m) => m[0] === mode)) mode = 'grid';
-  let q = ''; let tag = ''; let sort = { k: tid === 'daily' ? 'date' : 'updated', dir: -1 };
-  const page = h('div', { class: 'page wide' });
-  const body = h('div', { class: 'type-body' });
-  const preview = (o) => { if (o.pdf) { let n = 0; walk(o.blocks, (b) => { if (b.pdf && !b.img) n++; }); return `${o.pdf.pages} page${o.pdf.pages > 1 ? 's' : ''} · ${n} highlight${n === 1 ? '' : 's'}`; } let p = ''; walk(o.blocks, (b) => { if (p.length < 140 && b.text.trim()) p += (p ? ' · ' : '') + b.text.replace(/\[\[|\]\]|\*\*/g, ''); }); return p.slice(0, 140) || 'Empty'; };
-  const tagsOf = (o) => { const set = new Set(); walk(o.blocks, (b) => linksIn(b.text).forEach((l) => set.add(l))); return set; };
-  const open = (o) => go('#/o/' + o.id);
-  const items = () => {
-    let r = objectsOfType(tid).filter((o) => o.title.toLowerCase().includes(q));
-    if (tag) r = r.filter((o) => tagsOf(o).has(tag));
-    const val = (o) => (sort.k === 'title' ? o.title.toLowerCase() : sort.k === 'date' ? o.date || '' : sort.k === 'updated' ? o.updated : (o.props?.[sort.k] || '').toLowerCase());
-    return r.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sort.dir);
-  };
-  const card = (o) => h('a', { class: 'obj-card', onclick: () => open(o), style: { '--c': t.color } },
-    (o.props?.cover || o.pdf?.thumb) ? h('img', { class: `obj-cover${o.pdf ? ' thumb' : ''}`, src: o.props?.cover || o.pdf.thumb, loading: 'lazy', alt: '', onerror: (e) => e.target.remove() }) : null,
-    h('div', { class: 'obj-card-top' }, typeBadge(t), h('span', { class: 'obj-card-time' }, timeAgo(o.updated))),
-    h('div', { class: 'obj-card-title' }, o.title), h('div', { class: 'obj-card-prev' }, preview(o)), o.props?.author ? h('div', { class: 'obj-card-sub' }, o.props.author) : null);
-  const paint = () => {
-    body.textContent = ''; const list = items();
-    if (!list.length) { body.append(h('div', { class: 'empty small' }, h('p', null, `No ${t.plural.toLowerCase()} yet.`))); return; }
-    if (mode === 'grid') body.append(h('div', { class: 'grid' }, list.map(card)));
-    else if (mode === 'list') body.append(h('div', { class: 'olist' }, list.map((o) => h('a', { class: 'orow', onclick: () => open(o), style: { '--c': t.color } }, typeBadge(t), h('span', { class: 'orow-title' }, o.title), h('span', { class: 'orow-prev' }, preview(o)), h('span', { class: 'orow-time' }, timeAgo(o.updated))))));
-    else if (mode === 'table') {
-      const cols = [{ k: 'title', l: 'Title' }, ...(t.props || []).filter((p) => p.kind !== 'richtext').slice(0, 5).map((p) => ({ k: p.key, l: p.label, kind: p.kind })), { k: 'updated', l: 'Updated' }];
-      const th = (c) => h('th', { class: sort.k === c.k ? 'sorted' : '', onclick: () => { sort = { k: c.k, dir: sort.k === c.k ? -sort.dir : 1 }; paint(); } }, c.l, sort.k === c.k ? (sort.dir > 0 ? ' ↑' : ' ↓') : '');
-      body.append(h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, cols.map(th))),
-        h('tbody', null, list.map((o) => h('tr', { onclick: () => open(o) }, cols.map((c) => h('td', { class: c.k === 'title' ? 'tt' : '' }, c.k === 'title' ? o.title : c.k === 'updated' ? timeAgo(o.updated) : cellText(o, c)))))))));
-    } else if (mode === 'board') {
-      const opts = [...selectProp.options, ''];
-      if (selects.length > 1) body.append(h('div', { class: 'board-group' }, 'Group by', h('select', { class: 'input', onchange: (e) => { S.settings.views[tid + ':group'] = e.target.value; touch(); renderType(tid); } }, selects.map((p) => h('option', { value: p.key, selected: p.key === selectProp.key }, p.label)))));
-      body.append(h('div', { class: 'board' }, opts.map((opt) => {
-        const col = list.filter((o) => (o.props?.[selectProp.key] || '') === opt);
-        const el = h('div', { class: 'col', 'data-opt': opt }, h('div', { class: 'col-head' }, h('span', null, opt || 'No ' + selectProp.label.toLowerCase()), h('b', null, col.length)), col.map((o) => { const c = card(o); c.draggable = true; c.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', o.id); }); return c; }));
-        el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('over'); }); el.addEventListener('dragleave', () => el.classList.remove('over'));
-        el.addEventListener('drop', (e) => { e.preventDefault(); const o = getObject(e.dataTransfer.getData('text/plain')); if (o) { o.props[selectProp.key] = opt; touch(o); paint(); } });
-        return el;
-      })));
-    }
-  };
-  const search = h('input', { class: 'input search', placeholder: `Search ${t.plural.toLowerCase()}…`, oninput: (e) => { q = e.target.value.toLowerCase(); paint(); } });
-  const allTags = objectsOfType('tag').map((x) => x.title);
-  const tagSel = allTags.length ? h('select', { class: 'input', onchange: (e) => { tag = e.target.value.toLowerCase(); paint(); } }, h('option', { value: '' }, 'All tags'), allTags.map((x) => h('option', { value: x }, '#' + x))) : null;
-  const seg = h('div', { class: 'seg icons' }, modes.map(([k, l, ic]) => h('button', { class: k === mode ? 'on' : '', title: l, html: icon(ic, 15), onclick: (e) => { mode = k; S.settings.views[tid] = k; touch(); seg.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); paint(); } })));
-  page.append(h('div', { class: 'view-head' }, h('h1', { class: 'with-ic', style: { '--c': t.color } }, typeBadge(t), t.plural),
-    h('span', { class: 'view-actions' }, tid === 'daily' ? null : h('button', { class: 'btn small', html: `${icon('edit', 13)}<span>Edit type</span>`, onclick: () => typeEditor(tid) }), tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>${tid === 'pdf' ? 'Import PDF' : 'New ' + esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) }))),
-    ...(tid === 'pdf' ? [dropZone()] : []),
-    h('div', { class: 'type-tools' }, search, tagSel, h('span', { class: 'top-spacer' }), seg), body);
-  paint(); root.append(page);
 }
 /** Pick files, import them, and open the result (a single file) or the PDFs list (several). */
 export async function importInto(into, accept = ACCEPT) {
@@ -878,39 +829,89 @@ function hlCardEl(it, { showSource = true, draggable = true } = {}) {
   return card;
 }
 
+const colorName = (it) => { const c = it.block.color || it.block.pdf?.color || 'yellow'; return HL_COL[c] ? c : 'yellow'; };
+const hlDate = (it) => Date.parse(it.block.at) || it.obj.updated || 0;
 function highlightBrowser({ compact }) {
   const wrap = h('div', { class: `hlb${compact ? ' compact' : ''}` });
+  S.settings.hlView ||= { mode: 'cards', sort: 'recent', group: 'source' };
+  const st = S.settings.hlView;
   let q = ''; let src = ''; let color = ''; let tag = ''; let kind = '';
   const all = I.allHighlights();
   const sources = [...new Map(all.map((x) => [x.obj.id, x.obj])).values()].sort((a, b) => a.title.localeCompare(b.title));
   const tags = [...new Set(all.flatMap((x) => x.block.hlTags || []))].sort();
   const list = h('div', { class: 'hl-list' });
+  const cap = (s) => s[0].toUpperCase() + s.slice(1);
+  const sorted = (items) => [...items].sort((a, b) => st.sort === 'oldest' ? hlDate(a) - hlDate(b) : st.sort === 'source' ? a.obj.title.localeCompare(b.obj.title) : st.sort === 'color' ? colorName(a).localeCompare(colorName(b)) : hlDate(b) - hlDate(a));
+  const openHl = (it) => go(`#/o/${it.obj.id}?b=${it.block.id}`);
+  const when = (it) => (it.block.pdf ? `p. ${it.block.pdf.page}` : it.block.loc ? `loc. ${it.block.loc}` : '');
+  const dateStr = (it) => (it.block.at ? new Date(it.block.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+  const groupItems = (items) => {
+    const g = new Map(); const add = (k, it) => { if (!g.has(k)) g.set(k, []); g.get(k).push(it); };
+    items.forEach((it) => { if (st.group === 'color') add(cap(colorName(it)), it); else if (st.group === 'tag') { (it.block.hlTags?.length ? it.block.hlTags.map((t) => '#' + t) : ['No tag']).forEach((k) => add(k, it)); } else add(it.obj.id, it); });
+    return g;
+  };
+  const sourceHead = (o, n) => { const t2 = typeOf(o); return h('div', { class: 'hl-ghead', onclick: () => go('#/o/' + o.id) }, o.props?.cover ? h('img', { src: o.props.cover, alt: '', loading: 'lazy', onerror: (e) => e.target.remove() }) : typeBadge(t2), h('div', null, h('div', { class: 'hl-gtitle' }, o.title), h('div', { class: 'hl-gsub' }, `${o.props?.author ? o.props.author + ' · ' : ''}${n} highlight${n > 1 ? 's' : ''}`))); };
+  const groupHead = (label, n, dot) => h('div', { class: 'hl-ghead plain' }, dot ? h('i', { class: 'hl-dot', style: { background: dot } }) : null, h('div', null, h('div', { class: 'hl-gtitle' }, label), h('div', { class: 'hl-gsub' }, `${n} highlight${n > 1 ? 's' : ''}`)));
+
+  const cardsView = (items) => {
+    if (st.group === 'none') return h('div', { class: 'hl-gbody' }, items.map((it) => hlCardEl(it)));
+    const out = document.createDocumentFragment();
+    groupItems(items).forEach((g, k) => out.append(h('section', { class: 'hl-group' }, st.group === 'source' ? sourceHead(g[0].obj, g.length) : groupHead(k, g.length, st.group === 'color' ? HL_COL[k.toLowerCase()] : null), h('div', { class: 'hl-gbody' }, g.map((it) => hlCardEl(it, { showSource: st.group !== 'source' }))))));
+    return out;
+  };
+  const rowEl = (it, showSrc) => h('div', { class: 'hl-row', style: { '--hl': hlColor(it) }, onclick: openHl },
+    h('i', { class: 'hl-bar' }), h('div', { class: 'hl-rbody' }, h('div', { class: 'hl-rtext', html: renderInline(it.block.text) }), it.note ? h('div', { class: 'hl-rnote', html: renderInline(it.note) }) : null),
+    h('div', { class: 'hl-rmeta' }, showSrc ? h('span', { class: 'hl-rsrc' }, it.obj.title) : null, when(it) ? h('span', null, when(it)) : null, ...(it.block.hlTags || []).map((t) => h('span', { class: 'hl-tag' }, '#' + t))),
+    h('button', { class: 'hl-add', title: 'Add to the open note', html: `${icon('plus', 12)}<span>Add</span>`, onclick: (e) => { e.stopPropagation(); insertRef(it.block.id); } }));
+  const listView = (items) => {
+    if (st.group === 'none') return h('div', { class: 'hl-rows' }, items.map((it) => rowEl(it, true)));
+    const out = document.createDocumentFragment();
+    groupItems(items).forEach((g, k) => out.append(h('section', { class: 'hl-group' }, st.group === 'source' ? sourceHead(g[0].obj, g.length) : groupHead(k, g.length, st.group === 'color' ? HL_COL[k.toLowerCase()] : null), h('div', { class: 'hl-rows' }, g.map((it) => rowEl(it, st.group !== 'source'))))));
+    return out;
+  };
+  const tableView = (items) => h('div', { class: 'db-wrap' }, h('table', { class: 'db hl-table' }, h('thead', null, h('tr', null, ['Highlight', 'Note', 'Source', 'Author', 'Color', 'Tags', 'Where', 'Date'].map((c) => h('th', null, c)))),
+    h('tbody', null, items.map((it) => h('tr', { class: 'db-row', onclick: () => openHl(it) },
+      h('td', { class: 'hl-c-text' }, h('div', { class: 'clamp', html: renderInline(it.block.text) })), h('td', { class: 'hl-c-note' }, h('div', { class: 'clamp', html: renderInline(it.note) })),
+      h('td', null, h('a', { class: 'hl-src', style: { '--c': typeOf(it.obj).color }, onclick: (e) => { e.stopPropagation(); go('#/o/' + it.obj.id); } }, it.obj.title)), h('td', { class: 'nowrap' }, it.obj.props?.author || ''),
+      h('td', null, h('span', { class: 'label-pill', style: { '--c': hlColor(it) } }, cap(colorName(it)))), h('td', null, (it.block.hlTags || []).map((t) => '#' + t).join(' ')), h('td', { class: 'nowrap' }, when(it)), h('td', { class: 'nowrap' }, dateStr(it)))))));
+  const boardView = (items) => h('div', { class: 'board' }, Object.keys(HL_COL).filter((c) => items.some((it) => colorName(it) === c) || ['yellow', 'green', 'blue', 'pink'].includes(c)).map((c) => {
+    const col = items.filter((it) => colorName(it) === c);
+    const el = h('div', { class: 'col' }, h('div', { class: 'col-head' }, h('i', { class: 'hl-dot', style: { background: HL_COL[c] } }), h('span', null, cap(c)), h('b', null, col.length)),
+      col.map((it) => { const card = hlCardEl(it); card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('application/x-folio-hl', it.block.id); }); return card; }));
+    el.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('application/x-folio-hl')) { e.preventDefault(); el.classList.add('over'); } }); el.addEventListener('dragleave', () => el.classList.remove('over'));
+    el.addEventListener('drop', (e) => {
+      const id = e.dataTransfer.getData('application/x-folio-hl'); const it = all.find((x) => x.block.id === id); if (!it) return; e.preventDefault();
+      if (it.block.pdf && !it.block.rw) it.block.pdf.color = ['yellow', 'green', 'blue', 'pink'].includes(c) ? c : it.block.pdf.color; else { it.block.color = c; it.block.colorEdited = true; }
+      touch(it.obj); paint();
+    });
+    return el;
+  }));
+
   const paint = () => {
     list.textContent = '';
-    const items = all.filter((x) => (!src || x.obj.id === src) && (!color || (x.block.color || x.block.pdf?.color || 'yellow') === color) && (!tag || (x.block.hlTags || []).includes(tag)) && (!kind || x.kind === kind)
-      && (!q || (x.block.text + ' ' + x.note + ' ' + x.obj.title).toLowerCase().includes(q)));
+    const items = sorted(all.filter((x) => (!src || x.obj.id === src) && (!color || colorName(x) === color) && (!tag || (x.block.hlTags || []).includes(tag)) && (!kind || x.kind === kind)
+      && (!q || (x.block.text + ' ' + x.note + ' ' + x.obj.title).toLowerCase().includes(q))));
     if (!items.length) { list.append(h('div', { class: 'empty small' }, h('p', null, all.length ? 'No highlights match.' : 'No highlights yet. Connect Readwise in Settings, or highlight text in a PDF.'))); return; }
     if (compact) { items.slice(0, 120).forEach((it) => list.append(hlCardEl(it))); return; }
-    const groups = new Map(); items.forEach((it) => { if (!groups.has(it.obj.id)) groups.set(it.obj.id, []); groups.get(it.obj.id).push(it); });
-    [...groups.values()].sort((a, b) => Math.max(...b.map((x) => Date.parse(x.block.at) || 0)) - Math.max(...a.map((x) => Date.parse(x.block.at) || 0))).forEach((g) => {
-      const o = g[0].obj; const st = typeOf(o);
-      list.append(h('section', { class: 'hl-group' },
-        h('div', { class: 'hl-ghead', onclick: () => go('#/o/' + o.id) }, o.props?.cover ? h('img', { src: o.props.cover, alt: '', loading: 'lazy', onerror: (e) => e.target.remove() }) : typeBadge(st), h('div', null, h('div', { class: 'hl-gtitle' }, o.title), h('div', { class: 'hl-gsub' }, `${o.props?.author ? o.props.author + ' · ' : ''}${g.length} highlight${g.length > 1 ? 's' : ''}`))),
-        h('div', { class: 'hl-gbody' }, g.map((it) => hlCardEl(it, { showSource: false })))));
-    });
+    list.append(st.mode === 'list' ? listView(items) : st.mode === 'table' ? tableView(items) : st.mode === 'board' ? boardView(items) : cardsView(items));
   };
   const sel = (label, opts, set) => h('select', { class: 'input', onchange: (e) => { set(e.target.value); paint(); } }, h('option', { value: '' }, label), opts.map(([v, l]) => h('option', { value: v }, l)));
+  const pick = (opts, key, onChange) => h('select', { class: 'input', onchange: (e) => { st[key] = e.target.value; touch(); onChange?.(); paint(); } }, opts.map(([v, l]) => h('option', { value: v, selected: st[key] === v }, l)));
+  const modeSeg = h('div', { class: 'seg icons' }, [['cards', 'Cards', 'grid'], ['list', 'List', 'list'], ['table', 'Table', 'table'], ['board', 'Board by color', 'board']].map(([m, l, ic]) => h('button', { class: st.mode === m ? 'on' : '', title: l, html: icon(ic, 15), onclick: (e) => { st.mode = m; touch(); modeSeg.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); groupSel.style.display = m === 'cards' || m === 'list' ? '' : 'none'; paint(); } })));
+  const groupSel = pick([['source', 'Group by source'], ['color', 'Group by color'], ['tag', 'Group by tag'], ['none', 'No grouping']], 'group');
+  groupSel.style.display = st.mode === 'cards' || st.mode === 'list' ? '' : 'none';
   wrap.append(h('div', { class: 'hl-tools' },
     h('input', { class: 'input search', placeholder: 'Search highlights…', oninput: (e) => { q = e.target.value.toLowerCase(); paint(); } }),
     sel('All sources', sources.map((o) => [o.id, o.title]), (v) => { src = v; }),
-    ...(compact ? [] : [sel('All colors', Object.keys(HL_COL).map((c) => [c, c[0].toUpperCase() + c.slice(1)]), (v) => { color = v; }), ...(tags.length ? [sel('All tags', tags.map((t) => [t, '#' + t]), (v) => { tag = v; })] : []), sel('Readwise + PDF', [['readwise', 'Readwise'], ['pdf', 'PDFs']], (v) => { kind = v; })])), list);
+    ...(compact ? [] : [sel('All colors', Object.keys(HL_COL).map((c) => [c, cap(c)]), (v) => { color = v; }), ...(tags.length ? [sel('All tags', tags.map((t) => [t, '#' + t]), (v) => { tag = v; })] : []), sel('Readwise + PDF', [['readwise', 'Readwise'], ['pdf', 'PDFs']], (v) => { kind = v; }),
+      pick([['recent', 'Newest first'], ['oldest', 'Oldest first'], ['source', 'By source'], ['color', 'By color']], 'sort'), groupSel, h('span', { class: 'top-spacer' }), modeSeg])), list);
   paint(); return wrap;
 }
 
 export function renderHighlights() {
   const root = main(); root.textContent = ''; setActions([]); setViewObj(null);
   const total = I.allHighlights().length;
-  const page = h('div', { class: 'page wide' }, h('div', { class: 'view-head' }, h('h1', null, 'Highlights', h('span', { class: 'muted' }, ` ${total}`)),
+  const page = h('div', { class: 'page wide db-page' }, h('div', { class: 'view-head' }, h('h1', null, 'Highlights', h('span', { class: 'muted' }, ` ${total}`)),
     I.readwiseConnected() ? h('button', { class: 'btn small', html: `${icon('refresh', 14)}<span>Sync Readwise</span>`, onclick: async (e) => { e.currentTarget.disabled = true; try { const r = await I.syncReadwise(); toast(`Readwise synced · ${r.highlights} new or changed`); } catch (err) { toast(err.message, { kind: 'warn', ms: 7000 }); } renderHighlights(); } }) : h('button', { class: 'btn small', onclick: () => go('#/settings') }, 'Connect Readwise')),
     h('p', { class: 'muted small hl-hint' }, 'Open any note and use the highlights drawer, or drag a card into a note. A dragged highlight stays linked to its source and shows your edits.'),
     highlightBrowser({ compact: false }));

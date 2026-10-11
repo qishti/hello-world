@@ -210,7 +210,7 @@ function upsertSource(bk) {
       const nb = f.children.find((c) => c.rwNote);
       if (hl.note) { if (!nb) f.children.unshift(newBlock(hl.note, { rwNote: true, rwText: hl.note })); else { if (nb.text === (nb.rwText ?? nb.text)) nb.text = hl.note; nb.rwText = hl.note; } }
       else if (nb && nb.text === (nb.rwText ?? nb.text)) f.children.splice(f.children.indexOf(nb), 1);
-      f.color = hl.color || f.color; f.hlTags = tags; f.loc = hl.location || f.loc;
+      if (!f.colorEdited) f.color = hl.color || f.color; f.hlTags = tags; f.loc = hl.location || f.loc;
       continue;
     }
     const kids = hl.note ? [newBlock(hl.note, { rwNote: true, rwText: hl.note })] : [];

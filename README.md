@@ -39,6 +39,14 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Version history per object, with preview and restore.
 - Presentation mode: top-level bullets become slides.
 
+**Database views (Notion and Obsidian Bases style)**
+- Every type page is a database. Saved views appear as tabs: Table, Gallery, List or Board, each with its own filters, sort, grouping and column choices. Double-click a tab to rename it.
+- Edit cells in place: text, numbers, dates, checkboxes, labels (with "New option…") and object links. Add rows with **New**, and rows inherit the group or filter you are in.
+- Add a property from the **+** in the table header. Header menus let you sort, hide, rename, change the property type, edit label options or delete it.
+- Filter with conditions per property, group by any label, checkbox, object or text property, and show, hide and reorder columns from **Properties**.
+- Daily notes have a **Reviewed** checkbox, a "To review" view, review marks in both calendars, and a nudge when yesterday was not reviewed.
+- Highlights offer Cards, List, Table and Board by color, with sorting and grouping by source, color or tag. Drag a card to another column to recolor it.
+
 **Types and properties (modeled on a Capacities space)**
 - Edit any type (name, icon, color) or create new ones from the sidebar `+`, Settings, an object's type pill, or a type page.
 - Property kinds: Text, Long text, Number, Date (single day or a range), Label (single choice with your own options), Checkbox, Link, and **Object**.
@@ -117,7 +125,8 @@ Settings has **Download all as Markdown (.zip)**: one `.md` per object with YAML
 index.html  styles.css  server.js
 js/store.js         data model, search, backlinks, persistence
 js/outline.js       block editor
-js/views.js         daily, object, tasks, calendar, graph, settings
+js/views.js         daily, object, tasks, calendar, graph, highlights, settings
+js/database.js      table, gallery, list and board views with filters and saved views
 js/integrations.js  Todoist, Readwise, calendar, reminders
 js/reader.js        PDF reader
 js/importer.js      drag-and-drop import (PDF, docx, md, text, images)
