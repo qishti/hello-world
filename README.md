@@ -6,6 +6,10 @@ No build step and no dependencies. Data stays in your browser (IndexedDB).
 
 ## Run it
 
+**macOS:** double-click `Folio.command`. It pulls the latest version, installs anything missing, restarts the server and opens the app. Close its Terminal window to stop Folio.
+
+**Or by hand:**
+
 ```sh
 npm install           # once; only needed for email-in
 node server.js        # http://localhost:8787
