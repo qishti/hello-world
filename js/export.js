@@ -21,7 +21,7 @@ export function blocksToMarkdown(blocks) {
       lines.push(`${pad}- \`\`\``, ...text.split('\n').map((l) => `${pad}  ${l}`), `${pad}  \`\`\``);
       return;
     }
-    if (b.img) { lines.push(`${pad}- ![snapshot${b.pdf ? ' p. ' + b.pdf.page : ''}](Files/${b.img}.png)`); if (!text) return; }
+    if (b.img) { lines.push(`${pad}- ![snapshot${b.pdf ? ' p. ' + b.pdf.page : ''}](Files/${b.img}.${b.imgExt || 'png'})`); if (!text) return; }
     const head = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', callout: '> [!note] ' }[b.type] || '';
     const box = b.task ? (b.task.status === 'done' ? '[x] ' : '[ ] ') : '';
     lines.push(`${pad}- ${box}${head}${text}${b.pdf && !b.img ? ` (p. ${b.pdf.page})` : ''}${b.hlTags?.length ? ' ' + b.hlTags.map((t) => '#' + t).join(' ') : ''}${b.task ? taskSuffix(b.task) : ''}`.replace(/\s+$/, ''));
@@ -87,8 +87,8 @@ export async function buildFiles() {
   }
   for (const o of allObjects()) {
     if (o.pdf?.fileId) { const f = await getFile(o.pdf.fileId); if (f) files.push({ path: `Files/${safe(o.pdf.name || o.title)}`, data: new Uint8Array(await f.arrayBuffer()) }); }
-    const imgs = []; walk(o.blocks, (b) => { if (b.img) imgs.push(b.img); });
-    for (const id of imgs) { const f = await getFile(id); if (f) files.push({ path: `Files/${id}.png`, data: new Uint8Array(await f.arrayBuffer()) }); }
+    const imgs = []; const imgExt = {}; walk(o.blocks, (b) => { if (b.img) { imgs.push(b.img); imgExt[b.img] = b.imgExt; } });
+    for (const id of imgs) { const f = await getFile(id); if (f) files.push({ path: `Files/${id}.${imgExt[id] || 'png'}`, data: new Uint8Array(await f.arrayBuffer()) }); }
   }
   files.push({ path: 'Tasks.md', content: tasksMarkdown() }, { path: 'Types.md', content: typesMarkdown() });
   const cal = calendarMarkdown(); if (cal) files.push({ path: 'Calendar.md', content: cal });

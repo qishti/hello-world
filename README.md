@@ -58,6 +58,13 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Your edits win: highlights you edit, annotate or embed are never overwritten or removed by a later sync. Unedited ones follow Readwise, including deletions.
 - Readwise color and tags come across; notes become child bullets.
 
+**Drag and drop import**
+- Drop files anywhere in Folio, or onto the drop zone at the top of the PDFs page. Several at once is fine.
+- PDFs open in the reader and get a first-page thumbnail. The same file is never imported twice.
+- Word (.docx), Markdown and text files become pages with headings, nested bullets, tasks and quotes. Images become image bullets.
+- If a note is open when you drop, links to the new pages (or the images themselves) are added to it.
+- Also available from the sidebar `+`, the command palette, and the PDFs page. Everything exports back out under `Files/`.
+
 **PDF reader**
 - Import a PDF from the sidebar `+`, the command palette, the PDFs page, or by dropping a file anywhere.
 - Page-by-page reader with zoom, arrow-key paging and your place remembered.
@@ -109,6 +116,7 @@ js/outline.js       block editor
 js/views.js         daily, object, tasks, calendar, graph, settings
 js/integrations.js  Todoist, Readwise, calendar, reminders
 js/reader.js        PDF reader
+js/importer.js      drag-and-drop import (PDF, docx, md, text, images)
 vendor/             PDF.js
 js/export.js        Markdown/zip export
 mail.js             email-in (IMAP) for the local server

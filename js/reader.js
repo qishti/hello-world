@@ -14,25 +14,29 @@ async function pdfjs() {
 const COLORS = { yellow: '#facc15', green: '#4ade80', blue: '#60a5fa', pink: '#f472b6' };
 export const HL_COLORS = COLORS;
 
+/** Import one PDF. Returns {obj, existed}; the same file (name and size) is not imported twice. */
 export async function importPDF(file) {
-  if (!file || !/pdf$/i.test(file.type || file.name)) { toast('That is not a PDF', { kind: 'warn' }); return null; }
+  const dup = Object.values(S.objects).find((o) => o.pdf && o.pdf.name === file.name && o.pdf.size === file.size);
+  if (dup) return { obj: dup, existed: true };
   const buf = await file.arrayBuffer();
   const L = await pdfjs();
   let doc;
-  try { doc = await L.getDocument({ data: buf.slice(0) }).promise; } catch (e) { toast('Could not read that PDF: ' + e.message, { kind: 'warn' }); return null; }
+  try { doc = await L.getDocument({ data: buf.slice(0) }).promise; } catch (e) { throw new Error(`Could not read ${file.name}: ${e.message}`); }
   let title = file.name.replace(/\.pdf$/i, '');
   let author = '';
   try { const m = await doc.getMetadata(); const mt = m.info?.Title?.trim(); if (mt && mt.length > 2 && !/^(about:|untitled|microsoft word|https?:)/i.test(mt)) title = mt; author = m.info?.Author || ''; } catch { /* no metadata */ }
+  let thumb = '';
+  try {
+    const pg = await doc.getPage(1); const base = pg.getViewport({ scale: 1 }); const vp = pg.getViewport({ scale: 240 / base.width });
+    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await pg.render({ canvasContext: ctx, viewport: vp }).promise; thumb = c.toDataURL('image/jpeg', 0.72);
+  } catch { /* thumbnail is optional */ }
   const fileId = uid() + uid();
   await putFile(fileId, new Blob([buf], { type: 'application/pdf' }));
-  const o = createObject({ type: 'pdf', title, props: author ? { author } : {}, blocks: [newBlock('')], extra: { pdf: { fileId, name: file.name, size: file.size, pages: doc.numPages, page: 1 } } });
-  return o;
-}
-export function pickPDF() {
-  return new Promise((res) => {
-    const inp = h('input', { type: 'file', accept: 'application/pdf,.pdf', style: { display: 'none' }, onchange: async () => { const f = inp.files[0]; inp.remove(); res(f ? await importPDF(f) : null); } });
-    document.body.append(inp); inp.click();
-  });
+  const o = createObject({ type: 'pdf', title, props: author ? { author } : {}, blocks: [newBlock('')], extra: { pdf: { fileId, name: file.name, size: file.size, pages: doc.numPages, page: 1, thumb } } });
+  doc.destroy?.();
+  return { obj: o, existed: false };
 }
 
 const STOP = new Set('the of and a to in is that for it as with was on be by this are at from or an which not but have has had were their its they you we can will more also been than these such other one all into may only when about there what who how some if our out so use used using et al fig figure table page pages however thus our them then both each any between over under after before during while where would could should those his her he she i my your'.split(' '));

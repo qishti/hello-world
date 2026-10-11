@@ -7,7 +7,7 @@ import * as I from './integrations.js';
 import { showMenu, closeMenu, toast, modal } from './ui.js';
 import { currentOutline } from './outline.js';
 import * as hooks from './hooks.js';
-import { importPDF } from './reader.js';
+
 
 const $ = (s) => document.querySelector(s);
 let sidebarEl; let panelEl; let calCursor = null; let panelObj = null;
@@ -129,7 +129,7 @@ export function paintSidebar() {
   const s = sidebarEl.querySelector('.sb-scroll'); if (s) s.scrollTop = sc;
 }
 function newMenu(anchor) {
-  showMenu({ anchor, keepFocus: false, items: Object.values(S.types).filter((t) => t.id !== 'daily').map((t) => ({ label: t.name, icon: t.icon, color: t.color, value: t.id })), onPick: (it) => V.newObject(it.value) });
+  showMenu({ anchor, keepFocus: false, items: [...Object.values(S.types).filter((t) => t.id !== 'daily').map((t) => ({ label: t.name, icon: t.icon, color: t.color, value: t.id })), { sep: true }, { label: 'Import files…', icon: 'download', value: '__import' }], onPick: (it) => (it.value === '__import' ? V.importInto(null) : V.newObject(it.value)) });
 }
 
 // ---------- command palette ----------
@@ -142,7 +142,7 @@ function openPalette() {
   const cmds = [
     { label: 'Go to today', icon: 'calendar', run: () => V.go('#/daily') }, { label: 'Open tasks', icon: 'check', run: () => V.go('#/tasks') }, { label: 'Open calendar', icon: 'calendar', run: () => V.go('#/calendar') },
     { label: 'Open highlights', icon: 'highlighter', run: () => V.go('#/highlights') }, { label: 'Open graph', icon: 'graph', run: () => V.go('#/graph') }, { label: 'Open settings', icon: 'sliders', run: () => V.go('#/settings') },
-    { label: 'New meeting note', icon: 'users', run: () => V.newObject('meeting') }, { label: 'Import PDF…', icon: 'pdf', run: () => V.newObject('pdf') }, { label: 'Sync everything', icon: 'refresh', run: () => syncAll(true) },
+    { label: 'New meeting note', icon: 'users', run: () => V.newObject('meeting') }, { label: 'Import files…', icon: 'download', run: () => V.importInto(null) }, { label: 'Sync everything', icon: 'refresh', run: () => syncAll(true) },
     { label: 'Toggle dark mode', icon: 'moon', run: () => { S.settings.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(); touch(); paintSidebar(); } },
   ];
   const paint = () => {
@@ -201,8 +201,26 @@ function bindGlobal() {
     else if (mod && e.key === '\\') { e.preventDefault(); toggleSidebar(); }
   });
   window.addEventListener('hashchange', route);
-  window.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
-  window.addEventListener('drop', async (e) => { const f = [...(e.dataTransfer?.files || [])].find((x) => /pdf$/i.test(x.type || x.name)); if (!f) return; e.preventDefault(); const o = await importPDF(f); if (o) V.go('#/o/' + o.id); });
+  // Drag files anywhere to import them; if a note is open, links (or images) are added to it.
+  let depth = 0; let overlay = null;
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  const openNote = () => { const { parts } = parseHash(); return parts[0] === 'o' ? getObject(parts[1]) : parts[0] === 'daily' ? ensureDaily(parts[1] || todayKey()) : null; };
+  const hideOverlay = () => { depth = 0; overlay?.remove(); overlay = null; };
+  window.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return; depth++;
+    if (overlay || location.hash === '#/type/pdf') return;
+    const n = openNote();
+    overlay = h('div', { class: 'drop-overlay' }, h('div', { class: 'drop-card' }, h('div', { html: icon('download', 30) }), h('b', null, 'Drop to import'), h('span', null, 'PDFs, Word, Markdown, text and images'), n ? h('em', null, `Links and images will be added to “${n.title}”`) : null));
+    document.body.append(overlay);
+  });
+  window.addEventListener('dragleave', (e) => { if (hasFiles(e) && --depth <= 0) hideOverlay(); });
+  window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('drop', async (e) => {
+    if (!hasFiles(e) || e.defaultPrevented) { hideOverlay(); return; }
+    e.preventDefault(); hideOverlay();
+    const files = [...e.dataTransfer.files]; if (!files.length) return;
+    await V.handleImport(files, openNote());
+  });
   const refresh = debounce(() => { const f = document.activeElement; if (f && f.matches?.('.blk-edit, .title-input, .prop-input, input, select')) { paintSidebar(); return; } route(); }, 30);
   window.addEventListener('folio:refresh', () => route());
   subscribe(() => { paintSidebar(); paintPanel(); });

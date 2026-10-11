@@ -418,3 +418,15 @@ canvas.graph { flex: 1; width: 100%; min-height: 300px; border: 1px solid var(--
 .g-key { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); } .g-key i { display: inline-block; width: 22px; height: 0; border-top: 1px dashed var(--faint); margin-left: 8px; } .g-key i.k-prop { border-top: 2px solid var(--accent); }
 .prop > * { justify-self: start; } .prop > .prop-input, .prop > .prop-date { justify-self: stretch; }
 .panel-in, .panel-in > * { min-width: 0; } .pn-actions { flex-wrap: wrap; }
+
+/* ---------- drag and drop import ---------- */
+.dropzone { display: flex; align-items: center; gap: 16px; padding: 22px 24px; margin: 4px 0 18px; border: 2px dashed var(--line-strong); border-radius: 16px; background: var(--bg2); cursor: pointer; transition: border-color .15s, background .15s, transform .15s; outline: 0; }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); transform: scale(1.01); }
+.dz-ic { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; color: #ef4444; background: color-mix(in srgb, #ef4444 13%, transparent); flex: none; }
+.dz-main { display: grid; gap: 2px; } .dz-main b { font-size: 16px; } .dz-main span { color: var(--muted); font-size: 13.5px; }
+.drop-overlay { position: fixed; inset: 0; z-index: 3000; background: color-mix(in srgb, var(--accent) 14%, rgba(255,255,255,.55)); backdrop-filter: blur(3px); display: grid; place-items: center; pointer-events: none; animation: fade .12s; }
+:root[data-theme="dark"] .drop-overlay { background: color-mix(in srgb, var(--accent) 22%, rgba(10,10,16,.65)); }
+.drop-card { display: grid; gap: 6px; justify-items: center; text-align: center; padding: 38px 54px; border: 2.5px dashed var(--accent); border-radius: 24px; background: var(--bg); box-shadow: var(--shadow); color: var(--accent-text); }
+.drop-card b { font-size: 20px; color: var(--text); } .drop-card span { color: var(--muted); } .drop-card em { font-style: normal; font-size: 13px; color: var(--accent-text); margin-top: 6px; }
+.obj-cover.thumb { width: 64px; height: auto; max-height: 90px; object-fit: cover; object-position: top; border: 1px solid var(--line); }

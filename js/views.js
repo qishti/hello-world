@@ -7,7 +7,8 @@ import { showMenu, toast, confirmBox, promptBox, modal, closeMenu } from './ui.j
 import * as I from './integrations.js';
 import * as hooks from './hooks.js';
 import { objectToMarkdown, downloadZip, downloadSingle } from './export.js';
-import { Reader, pickPDF } from './reader.js';
+import { Reader } from './reader.js';
+import { pickFiles, importFiles, ACCEPT } from './importer.js';
 
 let reader = null;
 export const stopReader = () => { reader?.destroy(); reader = null; };
@@ -481,6 +482,17 @@ function cellText(o, c) {
   if (c.kind === 'date' && v) return String(v).split('->').map((x) => relDate(x.trim())).join(' → ');
   return v ?? '';
 }
+function dropZone() {
+  const z = h('div', { class: 'dropzone', tabindex: '0', role: 'button' },
+    h('div', { class: 'dz-ic', html: icon('pdf', 26) }),
+    h('div', { class: 'dz-main' }, h('b', null, 'Drop PDFs here'), h('span', null, 'or click to browse. You can drop several at once, plus Word, Markdown, text and images.')));
+  z.addEventListener('click', () => importInto(null));
+  z.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); importInto(null); } });
+  z.addEventListener('dragover', (e) => { e.preventDefault(); z.classList.add('over'); });
+  z.addEventListener('dragleave', (e) => { if (!z.contains(e.relatedTarget)) z.classList.remove('over'); });
+  z.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); z.classList.remove('over'); document.querySelector('.drop-overlay')?.remove(); const f = [...(e.dataTransfer?.files || [])]; if (f.length) handleImport(f, null); });
+  return z;
+}
 export function renderType(tid) {
   const t = S.types[tid]; const root = main(); root.textContent = '';
   if (!t) return go('#/daily');
@@ -493,7 +505,7 @@ export function renderType(tid) {
   let q = ''; let tag = ''; let sort = { k: tid === 'daily' ? 'date' : 'updated', dir: -1 };
   const page = h('div', { class: 'page wide' });
   const body = h('div', { class: 'type-body' });
-  const preview = (o) => { let p = ''; walk(o.blocks, (b) => { if (p.length < 140 && b.text.trim()) p += (p ? ' · ' : '') + b.text.replace(/\[\[|\]\]|\*\*/g, ''); }); return p.slice(0, 140) || 'Empty'; };
+  const preview = (o) => { if (o.pdf) { let n = 0; walk(o.blocks, (b) => { if (b.pdf && !b.img) n++; }); return `${o.pdf.pages} page${o.pdf.pages > 1 ? 's' : ''} · ${n} highlight${n === 1 ? '' : 's'}`; } let p = ''; walk(o.blocks, (b) => { if (p.length < 140 && b.text.trim()) p += (p ? ' · ' : '') + b.text.replace(/\[\[|\]\]|\*\*/g, ''); }); return p.slice(0, 140) || 'Empty'; };
   const tagsOf = (o) => { const set = new Set(); walk(o.blocks, (b) => linksIn(b.text).forEach((l) => set.add(l))); return set; };
   const open = (o) => go('#/o/' + o.id);
   const items = () => {
@@ -503,7 +515,7 @@ export function renderType(tid) {
     return r.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sort.dir);
   };
   const card = (o) => h('a', { class: 'obj-card', onclick: () => open(o), style: { '--c': t.color } },
-    o.props?.cover ? h('img', { class: 'obj-cover', src: o.props.cover, loading: 'lazy', alt: '', onerror: (e) => e.target.remove() }) : null,
+    (o.props?.cover || o.pdf?.thumb) ? h('img', { class: `obj-cover${o.pdf ? ' thumb' : ''}`, src: o.props?.cover || o.pdf.thumb, loading: 'lazy', alt: '', onerror: (e) => e.target.remove() }) : null,
     h('div', { class: 'obj-card-top' }, typeBadge(t), h('span', { class: 'obj-card-time' }, timeAgo(o.updated))),
     h('div', { class: 'obj-card-title' }, o.title), h('div', { class: 'obj-card-prev' }, preview(o)), o.props?.author ? h('div', { class: 'obj-card-sub' }, o.props.author) : null);
   const paint = () => {
@@ -534,11 +546,24 @@ export function renderType(tid) {
   const seg = h('div', { class: 'seg icons' }, modes.map(([k, l, ic]) => h('button', { class: k === mode ? 'on' : '', title: l, html: icon(ic, 15), onclick: (e) => { mode = k; S.settings.views[tid] = k; touch(); seg.querySelectorAll('button').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); paint(); } })));
   page.append(h('div', { class: 'view-head' }, h('h1', { class: 'with-ic', style: { '--c': t.color } }, typeBadge(t), t.plural),
     h('span', { class: 'view-actions' }, tid === 'daily' ? null : h('button', { class: 'btn small', html: `${icon('edit', 13)}<span>Edit type</span>`, onclick: () => typeEditor(tid) }), tid === 'daily' ? null : h('button', { class: 'btn primary small', html: `${icon('plus', 14)}<span>${tid === 'pdf' ? 'Import PDF' : 'New ' + esc(t.name.toLowerCase())}</span>`, onclick: () => newObject(tid) }))),
+    ...(tid === 'pdf' ? [dropZone()] : []),
     h('div', { class: 'type-tools' }, search, tagSel, h('span', { class: 'top-spacer' }), seg), body);
   paint(); root.append(page);
 }
+/** Pick files, import them, and open the result (a single file) or the PDFs list (several). */
+export async function importInto(into, accept = ACCEPT) {
+  const files = await pickFiles({ accept }); if (!files.length) return;
+  await handleImport(files, into);
+}
+export async function handleImport(files, into) {
+  const res = await importFiles(files, { into });
+  const objs = res.filter((r) => !r.inline).map((r) => r.obj);
+  if (!objs.length) { rerender(); return; }
+  const to = objs.length === 1 && !into ? '#/o/' + objs[0].id : res.every((r) => r.kind === 'pdf') && !into ? '#/type/pdf' : null;
+  if (to && location.hash !== to) go(to); else rerender();
+}
 export function newObject(tid = 'page') {
-  if (tid === 'pdf') return pickPDF().then((o) => o && go('#/o/' + o.id));
+  if (tid === 'pdf') return importInto(null, '.pdf,application/pdf');
   const o = createObject({ type: tid, title: 'Untitled', blocks: tid === 'meeting' ? import_meetingBlocks() : undefined, props: tid === 'meeting' ? { date: todayKey() } : {} });
   o._fresh = true; go('#/o/' + o.id);
 }
