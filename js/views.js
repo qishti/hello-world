@@ -662,7 +662,7 @@ export function renderGraph(focusId) {
       ctx.globalAlpha = dim ? 0.18 : 1;
       ctx.fillStyle = typeOf(n.o).color; ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 7); ctx.fill();
       if (n.o.id === focus?.id || match(n)) { ctx.strokeStyle = text; ctx.lineWidth = 2 / scale; ctx.stroke(); }
-      if (!dim && (scale > 0.65 || n === hover || n.r > 9 || match(n))) { ctx.fillStyle = text; ctx.font = `${n === hover || n.o.id === focus?.id ? 600 : 500} ${12 / Math.max(scale, 0.8)}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`; ctx.textAlign = 'center'; ctx.fillText(n.o.title.length > 28 ? n.o.title.slice(0, 27) + '…' : n.o.title, n.x, n.y + n.r + 14 / Math.max(scale, 0.8)); }
+      if (!dim && (scale > 0.65 || n === hover || n.r > 9 || match(n))) { ctx.fillStyle = text; ctx.font = `${n === hover || n.o.id === focus?.id ? 600 : 500} ${12 / Math.max(scale, 0.8)}px Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`; ctx.textAlign = 'center'; ctx.fillText(n.o.title.length > 28 ? n.o.title.slice(0, 27) + '…' : n.o.title, n.x, n.y + n.r + 14 / Math.max(scale, 0.8)); }
     }
     ctx.globalAlpha = 1;
   };

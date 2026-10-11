@@ -10,7 +10,7 @@ const mail = require('./mail');
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1'; // local only: the mail and proxy endpoints carry your credentials
 const ROOT = __dirname;
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.mjs': 'text/javascript; charset=utf-8', '.pdf': 'application/pdf', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.mjs': 'text/javascript; charset=utf-8', '.woff2': 'font/woff2', '.pdf': 'application/pdf', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 // Hosts the proxy will talk to. Add your own calendar host here if needed.
 const ALLOW = [/^readwise\.io$/, /^api\.todoist\.com$/, /(^|\.)google\.com$/, /(^|\.)icloud\.com$/, /(^|\.)office365\.com$/, /(^|\.)outlook\.com$/, /(^|\.)live\.com$/, /(^|\.)fastmail\.com$/, /(^|\.)proton\.me$/, /(^|\.)nextcloud\.com$/];
 
