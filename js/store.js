@@ -92,8 +92,10 @@ const subs = new Set();
 export const subscribe = (fn) => { subs.add(fn); return () => subs.delete(fn); };
 const emit = debounce(() => subs.forEach((f) => f()), 120);
 /** Call after mutating data. struct=true when titles/blocks were added, removed or moved. */
+export const dirtyIds = new Set(); // objects changed since the vault last wrote them
+export const persist = () => doSave();
 export function touch(obj, struct = false) {
-  if (obj) { obj.updated = Date.now(); if (obj.type !== 'daily' || obj.blocks.length > 1 || obj.blocks[0]?.text) snapshotLater(obj); }
+  if (obj) { dirtyIds.add(obj.id); obj.updated = Date.now(); if (obj.type !== 'daily' || obj.blocks.length > 1 || obj.blocks[0]?.text) snapshotLater(obj); }
   if (struct) index = null;
   doSave();
   emit();
@@ -148,8 +150,8 @@ export function findByTitle(title) {
   return k ? ensureDaily(k) : null;
 }
 export function createObject({ type = 'page', title = 'Untitled', blocks, props = {}, extra = {} } = {}) {
-  const id = uid();
-  const o = { id, type, title, props, blocks: blocks || [newBlock('')], created: Date.now(), updated: Date.now(), ...extra };
+  const id = extra.id || uid();
+  const o = { type, title, props, blocks: blocks || [newBlock('')], created: Date.now(), updated: Date.now(), ...extra, id };
   S.objects[id] = o;
   touch(o, true);
   return o;
@@ -173,11 +175,12 @@ export function renameObject(obj, title) {
   obj.title = title;
   if (obj.type === 'tag') {
     const tre = new RegExp(`(^|\\s)#${old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'gi');
-    for (const o of Object.values(S.objects)) walk(o.blocks, (b) => { b.text = b.text.replace(tre, `$1#${title}`).replace(re, `[[${title}]]`); });
+    for (const o of Object.values(S.objects)) walk(o.blocks, (b) => { const t = b.text.replace(tre, `$1#${title}`).replace(re, `[[${title}]]`); if (t !== b.text) { b.text = t; dirtyIds.add(o.id); } });
   } else {
-    for (const o of Object.values(S.objects)) walk(o.blocks, (b) => { if (b.text.includes('[[')) b.text = b.text.replace(re, `[[${title}]]`); });
+    for (const o of Object.values(S.objects)) walk(o.blocks, (b) => { if (b.text.includes('[[')) { const t = b.text.replace(re, `[[${title}]]`); if (t !== b.text) { b.text = t; dirtyIds.add(o.id); } } });
   }
   touch(obj, true);
+  for (const o of Object.values(S.objects)) if (o !== obj && propRefs(o).some((r) => r.target === obj)) dirtyIds.add(o.id);
 }
 export const objectsOfType = (t) => Object.values(S.objects).filter((o) => o.type === t && !isEmptyDaily(o));
 export const allObjects = () => Object.values(S.objects).filter((o) => !isEmptyDaily(o));

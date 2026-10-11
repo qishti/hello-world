@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
 const mail = require('./mail');
+const vault = require('./vault');
 
 const PORT = Number(process.argv[2] || process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1'; // local only: the mail and proxy endpoints carry your credentials
@@ -32,6 +33,22 @@ async function mailApi(req, res, u) {
   json(res, 404, { error: 'not found' });
 }
 
+async function vaultApi(req, res, u) {
+  if (req.headers['x-folio'] !== '1') return json(res, 403, { error: 'forbidden' });
+  const p = u.pathname.replace('/vault/', '');
+  try {
+    if (p === 'status') return json(res, 200, vault.status());
+    if (p === 'config' && req.method === 'POST') return json(res, 200, vault.setDir((await body(req)).dir));
+    if (p === 'config' && req.method === 'DELETE') return json(res, 200, vault.clear());
+    if (p === 'write' && req.method === 'POST') { const b = await body(req); return json(res, 200, vault.write(b.items, b.remove)); }
+    if (p === 'ack' && req.method === 'POST') return json(res, 200, vault.ack((await body(req)).items));
+    if (p === 'changes') return json(res, 200, { changes: vault.changes(u.searchParams.get('all') === '1') });
+    if (p === 'has') return json(res, 200, { has: vault.hasFile(u.searchParams.get('id')) });
+    if (p === 'file' && req.method === 'PUT') { const c = []; for await (const x of req) c.push(x); return json(res, 200, vault.putFile(u.searchParams.get('path'), u.searchParams.get('id'), Buffer.concat(c))); }
+  } catch (e) { return json(res, 400, { error: e.message }); }
+  json(res, 404, { error: 'not found' });
+}
+
 async function proxy(req, res, u) {
   const target = u.searchParams.get('url');
   let t;
@@ -53,12 +70,13 @@ http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://${req.headers.host}`);
   if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.headers.host || '')) { res.writeHead(403); return res.end('local access only'); }
   if (u.pathname.startsWith('/mail/')) return mailApi(req, res, u);
+  if (u.pathname.startsWith('/vault/')) return vaultApi(req, res, u);
   if (u.pathname === '/proxy/health') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}'); }
   if (u.pathname === '/proxy') return proxy(req, res, u);
   let p = path.normalize(decodeURIComponent(u.pathname)).replace(/^(\.\.[/\\])+/, '');
   if (p.endsWith(path.sep) || p === '.') p = path.join(p, 'index.html');
   const file = path.join(ROOT, p);
-  if (!file.startsWith(ROOT) || /(^|[/\\])(\.git|node_modules|server\.js|mail\.js|\.folio-|package(-lock)?\.json)/.test(p)) { res.writeHead(403); return res.end(); }
+  if (!file.startsWith(ROOT) || /(^|[/\\])(\.git|node_modules|\.folio-)/.test(p) || /^[/\\]?(server|mail|vault)\.js$/.test(p) || /^[/\\]?package(-lock)?\.json$/.test(p)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });

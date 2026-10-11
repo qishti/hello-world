@@ -5,6 +5,7 @@ import { mountOutline } from './outline.js';
 import { renderInline, chip } from './inline.js';
 import { showMenu, toast, confirmBox, promptBox, modal, closeMenu } from './ui.js';
 import * as I from './integrations.js';
+import * as VT from './vault.js';
 import * as hooks from './hooks.js';
 import { objectToMarkdown, downloadZip, downloadSingle } from './export.js';
 import { Reader } from './reader.js';
@@ -720,6 +721,24 @@ export function renderSettings() {
   paintTypes();
   page.append(sec('Object types', 'Every note is an object with a type. Edit a type to rename it, change its icon and color, or add properties. An “Object” property links to other types, like Attendees to People.', typeList,
     h('div', { class: 'set-actions' }, h('button', { class: 'btn primary', html: `${icon('plus', 14)}<span>New type</span>`, onclick: () => typeEditor(null) }))));
+
+  // Markdown vault
+  const vSec = h('div', { class: 'set-body' }); const vMsg = h('div', { class: 'set-msg' });
+  const paintVault = async () => {
+    vSec.textContent = '';
+    if (!runtime.proxy) { vSec.append(h('div', { class: 'muted small' }, 'Run “node server.js” (or double-click Folio.command) and open Folio from it to keep a Markdown folder.')); return; }
+    let st; try { st = await VT.vaultStatus(); } catch (e) { vSec.append(h('div', { class: 'set-msg err' }, e.message)); return; }
+    const on = st.configured && S.settings.vault?.on;
+    const dir = h('input', { class: 'input grow', placeholder: '~/Documents/Folio Vault', value: st.dir || '~/Documents/Folio Vault' });
+    vSec.append(h('div', { class: 'set-form' }, dir, h('button', { class: 'btn primary', onclick: async (e) => { e.currentTarget.disabled = true; vMsg.className = 'set-msg'; vMsg.textContent = 'Writing notes…'; try { await VT.connectVault(dir.value); vMsg.textContent = 'Connected. Notes are written as .md files and kept in sync.'; vMsg.className = 'set-msg ok'; paintVault(); } catch (err) { vMsg.textContent = err.message; vMsg.className = 'set-msg err'; e.currentTarget.disabled = false; } } }, on ? 'Change folder' : 'Connect folder')));
+    if (on) vSec.append(h('div', { class: 'set-actions' },
+      h('button', { class: 'btn', html: `${icon('refresh', 14)}<span>Sync now</span>`, onclick: async () => { vMsg.className = 'set-msg'; vMsg.textContent = 'Syncing…'; const n = await VT.pullChanges(); await VT.syncNow({ all: true }); vMsg.textContent = VT.vstate.error || `Done${n ? ` · took in ${n} edited file${n > 1 ? 's' : ''}` : ''}.`; vMsg.className = 'set-msg' + (VT.vstate.error ? ' err' : ' ok'); if (n) rerender(); } }),
+      h('button', { class: 'btn', onclick: async () => { vMsg.className = 'set-msg'; vMsg.textContent = 'Reading every note…'; const n = await VT.pullChanges({ all: true }); vMsg.textContent = VT.vstate.error || `Read ${n} notes from the folder.`; vMsg.className = 'set-msg' + (VT.vstate.error ? ' err' : ' ok'); rerender(); } }, 'Re-read whole folder'),
+      h('button', { class: 'btn ghost', onclick: async () => { await VT.disconnectVault(); paintVault(); } }, 'Disconnect'),
+      h('span', { class: 'muted small' }, `${st.files} notes${VT.vstate.last ? ' · last written ' + timeAgo(VT.vstate.last) : ''}${VT.vstate.error ? ' · ' + VT.vstate.error : ''}`)));
+  };
+  page.append(sec('Markdown vault', 'Keep every note as a plain .md file in a folder, one file per note, with properties as YAML front matter and bullets as an outline. Open the same folder as a vault in Obsidian. Edits you make there flow back into Folio. Files are grouped by type, daily notes are named by date, and PDFs and images go in Files/. Deleting a file in the folder does not delete the note; Folio writes it back.', vSec, vMsg));
+  paintVault();
 
   // Data
   const imp = h('input', { type: 'file', accept: '.json', style: { display: 'none' }, onchange: async (e) => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (!d.objects) throw new Error('Not a Folio export'); if (!(await confirmBox('Replace all current data with this file?', 'Replace'))) return; Object.assign(S, d); touch(null, true); location.hash = '#/daily'; location.reload(); } catch (err) { toast(err.message, { kind: 'warn' }); } } });

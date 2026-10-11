@@ -7,6 +7,7 @@ import * as I from './integrations.js';
 import { showMenu, closeMenu, toast, modal } from './ui.js';
 import { currentOutline } from './outline.js';
 import * as hooks from './hooks.js';
+import * as VT from './vault.js';
 
 
 const $ = (s) => document.querySelector(s);
@@ -244,11 +245,13 @@ function bindGlobal() {
   // Readwise background sync, like Heptabase: on open, then every 10 minutes while visible
   const rw = async () => { try { const n = await I.autoReadwise(); if (n) { toast(`Readwise: ${n} new or updated highlight${n > 1 ? 's' : ''}`, { actions: [{ label: 'View', fn: () => V.go('#/highlights') }] }); paintSidebar(); } } catch { /* offline or rate limited */ } };
   setTimeout(rw, 3000); setInterval(() => { if (document.visibilityState === 'visible') rw(); }, 10 * 60e3);
+  // Markdown vault: write notes to a folder and absorb edits made in other editors
+  VT.startVault((n) => { toast(`${n} note${n > 1 ? 's' : ''} updated from your vault folder`); if (!document.activeElement?.matches?.('textarea, input, select')) route(); });
   // Email-in: file any queued mail on open, then every 90 seconds while visible
   const em = async () => { if (!runtime.proxy) return; try { const st = await I.emailStatus(); if (!st.configured) return; const r = await I.pullEmail(); if (r.n) { toast(`${r.n} new email${r.n > 1 ? 's' : ''} added to your daily note`, { actions: [{ label: 'View', fn: () => V.go('#/o/' + ensureObject('email', 'tag').id) }] }); route(); } } catch { /* server offline */ } };
   setTimeout(em, 2500); setInterval(() => { if (document.visibilityState === 'visible') em(); }, 90000);
   // quiet background sync for connected services
   setTimeout(() => { if (I.todoistConnected() || S.settings.icsUrls.length) syncAll(false); }, 1500);
   if ('serviceWorker' in navigator) { /* offline support intentionally omitted */ }
-  window.folio = { store, V, I, };
+  window.folio = { store, V, I, VT };
 })();

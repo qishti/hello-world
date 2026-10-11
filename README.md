@@ -39,6 +39,15 @@ Any static host also works (GitHub Pages, `npx http-server`). `server.js` additi
 - Version history per object, with preview and restore.
 - Presentation mode: top-level bullets become slides.
 
+**Markdown vault (Obsidian-compatible)**
+- Settings > Markdown vault: pick a folder (default `~/Documents/Folio Vault`) and every note is written there as its own `.md` file, kept up to date as you type.
+- One file per note, grouped by type: `People/Ada Lovelace.md`, `Meetings/Product sync.md`, `Daily notes/2026-10-11.md`. PDFs and images go in `Files/`.
+- Properties are YAML front matter (`title`, `type`, `aliases`, `tags`, your properties, object links as `[[Wikilinks]]`). Notes are nested bullets; tasks use `- [ ]` with 📅 ⏰ 🔁 markers; links are `[[Title]]`; tags are `#tag`.
+- Open the same folder as an Obsidian vault. Edit there and the changes flow back into Folio within seconds, including new files, renamed files, checkboxes and properties. Folio keeps the previous version in History.
+- Safe by design: a note edited in both places keeps both (the other copy is saved as "(conflict …)"); deleting a file does not delete the note, Folio writes it back; only the chosen folder is ever touched.
+- Restore on a new computer: connect the same folder and press "Re-read whole folder". Highlights, PDFs, properties and links come back.
+- Needs `node server.js` (or `Folio.command`) because browsers cannot write to a folder on their own.
+
 **Database views (Notion and Obsidian Bases style)**
 - Every type page is a database. Saved views appear as tabs: Table, Gallery, List or Board, each with its own filters, sort, grouping and column choices. Double-click a tab to rename it.
 - Edit cells in place: text, numbers, dates, checkboxes, labels (with "New option…") and object links. Add rows with **New**, and rows inherit the group or filter you are in.
@@ -133,6 +142,8 @@ js/importer.js      drag-and-drop import (PDF, docx, md, text, images)
 vendor/             PDF.js
 js/export.js        Markdown/zip export
 mail.js             email-in (IMAP) for the local server
+vault.js            Markdown vault writer for the local server
+js/vault.js         vault sync client; js/vaultmd.js note format
 js/ics.js           iCalendar parser with recurrence expansion
 js/app.js           shell, router, sidebar, command palette
 ```
